@@ -167,7 +167,7 @@
 
   <button id="btnImagens">📂 escolher imagens…</button>
   <div class="dica">ou arraste os PNGs pra tela · ordem natural dos nomes</div>
-  <input type="file" id="arquivos" accept="image/*" multiple hidden>
+  <input type="file" id="arquivos" accept="image/png,image/jpeg,image/gif,image/webp,image/bmp" multiple hidden>
 
   <label>largura (chars por linha)</label>
   <input type="number" id="cfgLargura" min="20" max="800" step="10" value="400">
@@ -434,8 +434,19 @@
   const ordemNatural = (a, b) =>
     a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
 
+  // só imagem raster — SVG e afins são bloqueados (o servidor também recusa)
+  const TIPOS_OK = ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/bmp'];
+  const EXT_OK = /\.(png|jpe?g|gif|webp|bmp)$/i;
+  const tipoPermitido = f => TIPOS_OK.includes(f.type) || (!f.type && EXT_OK.test(f.name));
+
   async function carregar(files) {
-    const lista = [...files].filter(f => f.type.startsWith('image/')).sort(ordemNatural);
+    const todos = [...files];
+    const lista = todos.filter(tipoPermitido).sort(ordemNatural);
+    const barrados = todos.filter(f => !tipoPermitido(f));
+    if (barrados.length) {
+      elStatus.textContent = `ignorado: ${barrados[0].name}${barrados.length > 1 ? ` +${barrados.length - 1}` : ''} — só PNG, JPG, GIF, WebP, BMP`;
+      if (!lista.length) return;
+    }
     if (!lista.length) return;
     await pingPronto; // garante que os limites do servidor já chegaram
     if (limites && lista.length > limites.maxArquivos) {
