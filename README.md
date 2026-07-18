@@ -19,5 +19,5 @@ OBS: quanto mais frames, maior fica o arquivo, ideal para pequenas animações e
 ***
 
 Este é um projeto para criação de Animações usando ASCII voltados para quem quer implementar em um APP ou coisa do tipo.
-Quanto mais char e frame tiver maior será o peso, idel para criar pequenas animações e inserir em paginas dando um deferencia baaca.
+Quanto mais char e frame tiver maior será o peso, idel para criar pequenas animações e inserir em paginas da web, blogs etc.
 
