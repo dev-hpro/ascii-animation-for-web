@@ -37,6 +37,10 @@
     bottom: 16px;
     transform: translateX(-50%);
     display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    max-width: calc(100vw - 16px);
+    box-sizing: border-box;
     gap: 12px;
     align-items: center;
     padding: 10px 18px;
@@ -49,6 +53,17 @@
     z-index: 5;
   }
   #controles.oculto { opacity: 0; pointer-events: none; }
+  #controles label { display: flex; align-items: center; gap: 6px; }
+  @media (max-width: 600px) {
+    #controles {
+      bottom: 8px;
+      gap: 8px;
+      padding: 8px 10px;
+      font-size: 12px;
+    }
+    #controles input[type=range] { width: min(38vw, 130px); }
+    #status { min-width: 0; text-align: center; }
+  }
 
   /* painel de configuração */
   #painel {
@@ -56,7 +71,7 @@
     top: 0;
     right: 0;
     bottom: 0;
-    width: 300px;
+    width: min(300px, 100vw);
     box-sizing: border-box;
     padding: 18px;
     background: rgba(0, 15, 4, .96);
@@ -548,14 +563,16 @@ ajustar();el.textContent=FRAMES[0];agendar();
     else if (e.key.toLowerCase() === 'c') $('btnPainel').onclick();
   });
 
-  // barra some com mouse parado
+  // barra some com mouse/toque parado (e volta com movimento ou toque)
   const controles = $('controles');
   let sumir = setTimeout(() => controles.classList.add('oculto'), 2500);
-  addEventListener('mousemove', () => {
+  const acordar = () => {
     controles.classList.remove('oculto');
     clearTimeout(sumir);
     sumir = setTimeout(() => controles.classList.add('oculto'), 2500);
-  });
+  };
+  addEventListener('mousemove', acordar);
+  addEventListener('touchstart', acordar, { passive: true });
 
   // ---------- início ----------
   // animação de exemplo (frames.js), carregada sob demanda pra não travar a página
