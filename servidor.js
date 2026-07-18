@@ -11,6 +11,7 @@ const http = require('http');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const zlib = require('zlib');
 const { spawnSync } = require('child_process');
 
 const DIR = __dirname;
@@ -203,8 +204,19 @@ const servidor = http.createServer(async (req, res) => {
       alvo = path.normalize(alvo).replace(/^(\.\.[/\\])+/, '');
       const arquivo = path.join(DIR, alvo);
       if (arquivo.startsWith(DIR) && fs.existsSync(arquivo) && fs.statSync(arquivo).isFile()) {
-        res.writeHead(200, { 'Content-Type': MIME[path.extname(arquivo)] || 'application/octet-stream' });
-        fs.createReadStream(arquivo).pipe(res);
+        const ext = path.extname(arquivo);
+        const cabecalhos = { 'Content-Type': MIME[ext] || 'application/octet-stream' };
+        // texto vai gzipado (frames.js de exemplo encolhe ~20x)
+        const gzip = ['.html', '.js', '.css', '.txt'].includes(ext) &&
+          /\bgzip\b/.test(req.headers['accept-encoding'] || '');
+        if (gzip) {
+          cabecalhos['Content-Encoding'] = 'gzip';
+          res.writeHead(200, cabecalhos);
+          fs.createReadStream(arquivo).pipe(zlib.createGzip()).pipe(res);
+        } else {
+          res.writeHead(200, cabecalhos);
+          fs.createReadStream(arquivo).pipe(res);
+        }
         return;
       }
     }

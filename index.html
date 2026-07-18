@@ -112,6 +112,17 @@
     right: 14px;
     z-index: 11;
   }
+  #credito {
+    position: fixed;
+    top: 14px;
+    left: 14px;
+    z-index: 11;
+    color: var(--verde);
+    font-size: 13px;
+    text-decoration: none;
+    opacity: .65;
+  }
+  #credito:hover { opacity: 1; text-decoration: underline; }
   #status { min-width: 110px; text-align: right; }
   #soltar {
     position: absolute;
@@ -131,6 +142,8 @@
 <body>
 <div id="tela"><pre id="frame">carregando…</pre></div>
 <div id="soltar">solte as imagens aqui</div>
+
+<a id="credito" href="https://henrique.pro/toolz" target="_blank" rel="noopener">henrique.pro/toolz</a>
 
 <button id="btnPainel">⚙ config</button>
 
@@ -545,7 +558,18 @@ ajustar();el.textContent=FRAMES[0];agendar();
   });
 
   // ---------- início ----------
-  // restaura a última animação criada NESTE navegador; usuário novo começa vazio
+  // animação de exemplo (frames.js), carregada sob demanda pra não travar a página
+  function carregarDemo() {
+    return new Promise(res => {
+      const s = document.createElement('script');
+      s.src = 'frames.js';
+      s.onload = () => res(Array.isArray(window.FRAMES) ? window.FRAMES : []);
+      s.onerror = () => res([]);
+      document.head.appendChild(s);
+    });
+  }
+
+  // restaura a última animação criada NESTE navegador; usuário novo vê a demo
   (async () => {
     const salvo = await carregarLocal();
     if (salvo && Array.isArray(salvo.frames) && salvo.frames.length && !frames.length) {
@@ -569,12 +593,21 @@ ajustar();el.textContent=FRAMES[0];agendar();
       mostrar();
       agendar();
     } else if (!frames.length) {
-      elFrame.textContent =
-        'ASCII Studio\n\n' +
-        'Arraste imagens pra cá ou use ⚙ config → escolher imagens.\n' +
-        'Ajuste largura, mapa de chars, cor…\n' +
-        'Depois gere um HTML estático com a animação.';
+      elFrame.textContent = 'carregando exemplo…';
       elFrame.style.fontSize = '20px';
+      const demo = await carregarDemo();
+      if (demo.length && !frames.length && !imagens.length) {
+        frames = demo;
+        ajustar();
+        mostrar();
+        agendar();
+      } else if (!frames.length) {
+        elFrame.textContent =
+          'ASCII Studio\n\n' +
+          'Arraste imagens pra cá ou use ⚙ config → escolher imagens.\n' +
+          'Ajuste largura, mapa de chars, cor…\n' +
+          'Depois gere um HTML estático com a animação.';
+      }
     }
   })();
 })();

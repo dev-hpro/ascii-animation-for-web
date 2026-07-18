@@ -23,7 +23,7 @@ Toda a conversão é feita no servidor pelo binário [ascii-image-converter](htt
 
 ### Multiusuário, sem estado no servidor
 
-O gerador é feito pra várias pessoas usarem ao mesmo tempo: cada navegador tem uma sessão isolada no servidor (cache temporário das imagens enviadas, que expira em 30 min sem uso e nunca é persistido). A última animação criada fica salva **só no navegador de quem criou** (IndexedDB) e reaparece quando a pessoa volta; usuários novos começam com a tela vazia.
+O gerador é feito pra várias pessoas usarem ao mesmo tempo: cada navegador tem uma sessão isolada no servidor (cache temporário das imagens enviadas, que expira em 30 min sem uso e nunca é persistido). A última animação criada fica salva **só no navegador de quem criou** (IndexedDB) e reaparece quando a pessoa volta; usuários novos veem a animação de exemplo (`frames.js`, servida com gzip e carregada sem travar a página).
 
 ### Variáveis de ambiente
 
