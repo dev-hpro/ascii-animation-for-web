@@ -5,6 +5,7 @@
   "main": "servidor.js",
   "scripts": {
     "start": "node servidor.js",
+    "dev": "MODO=dev node servidor.js",
     "build": "bash instala-conversor.sh"
   },
   "engines": {

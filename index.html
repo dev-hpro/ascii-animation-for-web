@@ -156,6 +156,7 @@
 </head>
 <body>
 <div id="tela"><pre id="frame">carregando…</pre></div>
+<audio id="audio" src="audio-exemplo.mp3" preload="auto"></audio>
 <div id="soltar">solte as imagens aqui</div>
 
 <a id="credito" href="https://henrique.pro" target="_blank" rel="noopener">henrique.pro</a>
@@ -167,7 +168,7 @@
 
   <button id="btnImagens">📂 escolher imagens…</button>
   <div class="dica">ou arraste os PNGs pra tela · ordem natural dos nomes</div>
-  <input type="file" id="arquivos" accept="image/png,image/jpeg,image/gif,image/webp,image/bmp" multiple hidden>
+  <input type="file" id="arquivos" accept="image/png,image/jpeg,image/gif,image/webp,image/bmp,application/zip,.zip" multiple hidden>
 
   <label>largura (chars por linha)</label>
   <input type="number" id="cfgLargura" min="20" max="800" step="10" value="400">
@@ -196,9 +197,21 @@
   <label>cor das letras</label>
   <input type="color" id="cfgCor" value="#00ff41">
 
+  <div class="linha" style="margin-top:12px">
+    <input type="checkbox" id="cfgAudio" checked>
+    <label for="cfgAudio">🔊 faixa de áudio (exemplo)</label>
+  </div>
+  <div class="dica">começa no primeiro frame e acompanha o fps: em 30 fps toca normal, com menos quadros fica mais lento</div>
+  <button id="btnAudio">🎵 enviar áudio…</button>
+  <div class="dica" id="infoAudio">o upload de áudio está em fase de testes</div>
+  <input type="file" id="arqAudio" accept="audio/mpeg,.mp3" hidden>
+
   <button id="btnConverter" class="destaque">↻ reconverter</button>
   <button id="btnExportar">⬇ gerar HTML estático</button>
   <div class="dica" id="infoExporta">o HTML gerado é um arquivo único com a animação embutida</div>
+
+  <button id="btnExemplo" hidden>⭐ definir como exemplo do site</button>
+  <div class="dica" id="dicaExemplo" hidden>grava a animação atual no exemplo.json.gz — commit + deploy publicam o exemplo</div>
 
   <button id="btnMinha">↩ minha última animação</button>
   <div class="dica">volta a última animação criada neste navegador</div>
@@ -229,13 +242,75 @@
 
   // A conversão é sempre feita no servidor (servidor.js + binário ascii-image-converter).
   let servidor = false;
-  let limites = null;  // { maxArquivos, maxTamanhoKb } informados pelo servidor
+  let limites = null;  // { maxArquivos (0 = sem limite), maxTamanhoKb } informados pelo servidor
+  let upload = false;  // deployado o upload fica desativado (fase de testes)
   let enviadas = false; // imagens já estão no cache do servidor?
   const pingPronto = location.protocol.startsWith('http')
     ? fetch('api/ping').then(r => r.json())
-        .then(j => { servidor = !!(j.ok && j.conversor); limites = j.limites || null; })
+        .then(j => {
+          servidor = !!(j.ok && j.conversor);
+          limites = j.limites || null;
+          upload = !!j.upload;
+          if (servidor && !upload) {
+            $('btnImagens').disabled = true;
+            $('btnImagens').textContent = '📂 envio em fase de testes';
+          }
+          if (servidor && upload) { // modo dev
+            $('btnExemplo').hidden = false;
+            $('dicaExemplo').hidden = false;
+            $('infoAudio').textContent = 'mp3 tocado junto da animação — o ⭐ grava ele como exemplo também';
+          }
+        })
         .catch(() => {})
     : Promise.resolve();
+
+  // ---------- áudio ----------
+  // A faixa começa junto com o primeiro frame e fica presa à taxa de quadros:
+  // no fps máximo (30) toca em velocidade normal; menos fps = áudio mais lento.
+  const FPS_MAX = 30;
+  const audio = $('audio');
+  let audioOk = true; // vira false se o exemplo não existir
+  audio.onerror = () => {
+    audioOk = false;
+    $('cfgAudio').checked = false;
+    $('cfgAudio').disabled = true;
+    $('infoAudio').textContent = 'exemplo de áudio não encontrado (audio-exemplo.mp3)';
+  };
+  function sintonizarAudio() {
+    // navegadores limitam playbackRate a ~0.0625–16
+    audio.playbackRate = Math.min(16, Math.max(0.0625, fps / FPS_MAX));
+  }
+  function sincronizarAudio() {
+    if (!audioOk) return;
+    sintonizarAudio();
+    if ($('cfgAudio').checked && tocando && frames.length > 1) {
+      // autoplay pode ser bloqueado antes do primeiro gesto do usuário:
+      // nesse caso o áudio começa (alinhado ao primeiro frame) no primeiro clique/tecla
+      audio.play().catch(tocarNoPrimeiroGesto);
+    } else {
+      audio.pause();
+    }
+  }
+  let esperandoGesto = false;
+  function tocarNoPrimeiroGesto() {
+    if (esperandoGesto) return;
+    esperandoGesto = true;
+    const inicia = () => {
+      removeEventListener('pointerdown', inicia);
+      removeEventListener('keydown', inicia);
+      esperandoGesto = false;
+      if (!audioOk || !$('cfgAudio').checked || !tocando || frames.length < 2) return;
+      atual = 0;
+      mostrar();
+      reiniciarAudio();
+    };
+    addEventListener('pointerdown', inicia);
+    addEventListener('keydown', inicia);
+  }
+  function reiniciarAudio() {
+    audio.currentTime = 0;
+    sincronizarAudio();
+  }
 
   // ---------- animação ----------
   function mostrar() {
@@ -246,11 +321,13 @@
   function passo(d = 1) {
     if (!frames.length) return;
     atual = (atual + d + frames.length) % frames.length;
+    if (atual === 0) reiniciarAudio(); // loop voltou ao primeiro frame
     mostrar();
   }
   function agendar() {
     clearInterval(timer);
     if (tocando && frames.length > 1) timer = setInterval(passo, 1000 / fps);
+    sincronizarAudio();
   }
   function alternar() {
     tocando = !tocando;
@@ -380,6 +457,7 @@
       atual = 0;
       ajustar();
       mostrar();
+      reiniciarAudio();
       agendar();
       salvarLocal();
     } catch (e) {
@@ -437,10 +515,14 @@
   const ordemNatural = (a, b) =>
     a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
 
-  // só imagem raster — SVG e afins são bloqueados (o servidor também recusa)
+  // só imagem raster — SVG e afins são bloqueados (o servidor também recusa).
+  // Zip entra como pacote de quadros: o servidor extrai e valida cada um —
+  // útil pra sequências grandes (o seletor de arquivos do navegador corta
+  // seleções muito grandes, ~2048 arquivos).
   const TIPOS_OK = ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/bmp'];
   const EXT_OK = /\.(png|jpe?g|gif|webp|bmp)$/i;
-  const tipoPermitido = f => TIPOS_OK.includes(f.type) || (!f.type && EXT_OK.test(f.name));
+  const ehZip = f => f.type === 'application/zip' || f.type === 'application/x-zip-compressed' || /\.zip$/i.test(f.name);
+  const tipoPermitido = f => ehZip(f) || TIPOS_OK.includes(f.type) || (!f.type && EXT_OK.test(f.name));
 
   async function carregar(files) {
     const todos = [...files];
@@ -452,7 +534,11 @@
     }
     if (!lista.length) return;
     await pingPronto; // garante que os limites do servidor já chegaram
-    if (limites && lista.length > limites.maxArquivos) {
+    if (servidor && !upload) {
+      elStatus.textContent = 'o envio de imagens está em fase de testes';
+      return;
+    }
+    if (limites && limites.maxArquivos > 0 && lista.length > limites.maxArquivos) {
       elStatus.textContent = `erro: máximo de ${limites.maxArquivos} arquivos por conversão`;
       return;
     }
@@ -461,7 +547,8 @@
       const novas = [];
       for (let i = 0; i < lista.length; i++) {
         const f = lista[i];
-        if (f.size > maxB) {
+        // zip vai inteiro — o limite por arquivo vale pros quadros de dentro
+        if (f.size > maxB && !ehZip(f)) {
           elStatus.textContent = `comprimindo ${i + 1}/${lista.length} (${f.name})…`;
           novas.push({ nome: f.name.replace(/\.[^.]+$/, '') + '.jpg', file: await comprimir(f, maxB) });
         } else {
@@ -504,6 +591,33 @@
   ['cfgLargura', 'cfgAltura', 'cfgMapa'].forEach(id =>
     $(id).addEventListener('input', () => { clearTimeout(deb); deb = setTimeout(reconverter, 400); }));
   $('cfgNegativo').onchange = reconverter;
+
+  // ---------- áudio: controles ----------
+  // ligar a faixa começa do zero, alinhada ao primeiro frame do loop atual
+  $('cfgAudio').onchange = e => {
+    if (e.target.checked) { atual = 0; mostrar(); reiniciarAudio(); }
+    else sincronizarAudio();
+  };
+  // upload de áudio: liberado em modo dev; em produção segue em fase de testes
+  let audioCustom = null; // mp3 enviado pelo usuário (modo dev)
+  $('btnAudio').onclick = async () => {
+    await pingPronto;
+    if (servidor && upload) $('arqAudio').click();
+    else elStatus.textContent = 'o upload de áudio está em fase de testes — por enquanto só a faixa de exemplo';
+  };
+  $('arqAudio').onchange = e => {
+    const f = e.target.files[0];
+    if (!f) return;
+    audioCustom = f;
+    audio.src = URL.createObjectURL(f);
+    audioOk = true;
+    $('cfgAudio').disabled = false;
+    $('cfgAudio').checked = true;
+    $('infoAudio').textContent = '🎵 ' + f.name;
+    atual = 0;
+    mostrar();
+    reiniciarAudio();
+  };
 
   // ---------- exportar HTML estático ----------
   $('btnExportar').onclick = () => {
@@ -589,8 +703,19 @@ ajustar();el.textContent=FRAMES[0];agendar();
   addEventListener('touchstart', acordar, { passive: true });
 
   // ---------- início ----------
-  // animação de exemplo (frames.js), carregada sob demanda pra não travar a página
-  function carregarDemo() {
+  // animação de exemplo, carregada sob demanda pra não travar a página.
+  // Formato preferido: exemplo.json.gz (JSON gzipado, gravado pelo modo dev);
+  // fallback: frames.js com window.FRAMES (formato antigo).
+  async function carregarDemo() {
+    try {
+      const r = await fetch('exemplo.json.gz');
+      if (r.ok && typeof DecompressionStream === 'function') {
+        const texto = await new Response(
+          r.body.pipeThrough(new DecompressionStream('gzip'))).text();
+        const fr = JSON.parse(texto);
+        if (Array.isArray(fr) && fr.length) return fr;
+      }
+    } catch {}
     return new Promise(res => {
       const s = document.createElement('script');
       s.src = 'frames.js';
@@ -615,10 +740,30 @@ ajustar();el.textContent=FRAMES[0];agendar();
     atual = 0;
     ajustar();
     mostrar();
+    reiniciarAudio();
     agendar();
   }
 
   // a última animação criada NESTE navegador volta sob demanda, pelo painel
+  // modo dev: grava a animação atual como o exemplo do site (frames.js)
+  $('btnExemplo').onclick = async () => {
+    if (!frames.length) { alert('Nada pra salvar — converta imagens primeiro.'); return; }
+    try {
+      const corpo = { frames };
+      if (audioCustom) corpo.audioB64 = await paraB64(audioCustom);
+      const r = await fetch('api/exemplo', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(corpo),
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.erro || r.status);
+      elStatus.textContent = `exemplo atualizado (${j.frames} frames${j.audio ? ' + áudio' : ''}) — commit + deploy pra publicar`;
+    } catch (e) {
+      elStatus.textContent = 'erro: ' + e.message;
+    }
+  };
+
   $('btnMinha').onclick = async () => {
     const salvo = await carregarLocal();
     if (salvo && Array.isArray(salvo.frames) && salvo.frames.length) aplicarSalvo(salvo);
@@ -635,6 +780,7 @@ ajustar();el.textContent=FRAMES[0];agendar();
       frames = demo;
       ajustar();
       mostrar();
+      reiniciarAudio();
       agendar();
       return;
     }
