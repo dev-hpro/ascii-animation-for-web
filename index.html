@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>ASCII Studio</title>
+<style>
+  :root { --verde: #00ff41; }
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: #000;
+    color: var(--verde);
+    font-family: "Cascadia Mono", "JetBrains Mono", "Fira Mono", monospace;
+    overflow: hidden;
+  }
+  #tela {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  #frame {
+    margin: 0;
+    white-space: pre;
+    line-height: 1;
+    color: var(--verde);
+    text-shadow: 0 0 6px color-mix(in srgb, var(--verde) 45%, transparent);
+  }
+
+  /* barra inferior */
+  #controles {
+    position: fixed;
+    left: 50%;
+    bottom: 16px;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    padding: 10px 18px;
+    background: rgba(0, 20, 5, .88);
+    border: 1px solid var(--verde);
+    border-radius: 8px;
+    font-size: 13px;
+    user-select: none;
+    transition: opacity .4s;
+    z-index: 5;
+  }
+  #controles.oculto { opacity: 0; pointer-events: none; }
+
+  /* painel de configuração */
+  #painel {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 300px;
+    box-sizing: border-box;
+    padding: 18px;
+    background: rgba(0, 15, 4, .96);
+    border-left: 1px solid var(--verde);
+    font-size: 13px;
+    overflow-y: auto;
+    z-index: 10;
+    transition: transform .25s;
+  }
+  #painel.fechado { transform: translateX(100%); }
+  #painel h2 { margin: 0 0 14px; font-size: 15px; }
+  #painel label { display: block; margin: 12px 0 4px; opacity: .9; }
+  #painel .dica { font-size: 11px; opacity: .55; margin-top: 2px; }
+  #painel input[type=number], #painel input[type=text], #painel select {
+    width: 100%;
+    box-sizing: border-box;
+    background: #000;
+    color: var(--verde);
+    border: 1px solid var(--verde);
+    border-radius: 4px;
+    font-family: inherit;
+    font-size: 13px;
+    padding: 5px 7px;
+  }
+  #painel input[type=color] {
+    width: 100%;
+    height: 30px;
+    background: #000;
+    border: 1px solid var(--verde);
+    border-radius: 4px;
+    padding: 2px;
+  }
+  #painel .linha { display: flex; gap: 8px; align-items: center; }
+  #painel .linha label { margin: 0; }
+  button {
+    background: none;
+    border: 1px solid var(--verde);
+    color: var(--verde);
+    font-family: inherit;
+    font-size: 13px;
+    padding: 5px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+  button:hover { background: var(--verde); color: #000; }
+  button.destaque { background: var(--verde); color: #000; font-weight: bold; }
+  button.destaque:hover { filter: brightness(1.2); }
+  #painel button { width: 100%; margin-top: 8px; }
+  input[type=range] { accent-color: var(--verde); width: 130px; }
+  #btnPainel {
+    position: fixed;
+    top: 14px;
+    right: 14px;
+    z-index: 11;
+  }
+  #status { min-width: 110px; text-align: right; }
+  #soltar {
+    position: absolute;
+    inset: 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 40, 10, .7);
+    border: 3px dashed var(--verde);
+    font-size: 26px;
+    z-index: 20;
+    pointer-events: none;
+  }
+  body.arrastando #soltar { display: flex; }
+</style>
+</head>
+<body>
+<div id="tela"><pre id="frame">carregando…</pre></div>
+<div id="soltar">solte as imagens aqui</div>
+
+<button id="btnPainel">⚙ config</button>
+
+<div id="painel" class="fechado">
+  <h2>⚙ Configuração</h2>
+
+  <button id="btnImagens">📂 escolher imagens…</button>
+  <div class="dica">ou arraste os PNGs pra tela · ordem natural dos nomes</div>
+  <input type="file" id="arquivos" accept="image/*" multiple hidden>
+
+  <label>largura (chars por linha)</label>
+  <input type="number" id="cfgLargura" min="20" max="800" step="10" value="400">
+  <div class="dica">mais chars = mais densidade/detalhe</div>
+
+  <label>altura (linhas)</label>
+  <input type="number" id="cfgAltura" min="0" max="400" step="1" value="0">
+  <div class="dica">0 = automática pela proporção da imagem</div>
+
+  <label>mapa de caracteres (escuro → claro)</label>
+  <input type="text" id="cfgMapa" value="@%#*+=:-. ">
+  <label>preset</label>
+  <select id="cfgPreset">
+    <option value="@%#*+=:-. ">padrão @%#*+=:-.␣</option>
+    <option value="█▓▒░ ">blocos █▓▒░␣</option>
+    <option value="@#S%?*+;:,. ">detalhado</option>
+    <option value="#. ">mínimo #.␣</option>
+    <option value="01 ">binário 01␣</option>
+  </select>
+
+  <div class="linha" style="margin-top:12px">
+    <input type="checkbox" id="cfgNegativo">
+    <label for="cfgNegativo">negativo (fundo escuro na imagem)</label>
+  </div>
+
+  <label>cor das letras</label>
+  <input type="color" id="cfgCor" value="#00ff41">
+
+  <button id="btnConverter" class="destaque">↻ reconverter</button>
+  <button id="btnExportar">⬇ gerar HTML estático</button>
+  <div class="dica" id="infoExporta">o HTML gerado é um arquivo único com a animação embutida</div>
+</div>
+
+<div id="controles">
+  <button id="btnPlay">⏸ pausa</button>
+  <button id="btnAnt">⏮</button>
+  <button id="btnProx">⏭</button>
+  <label>fps <input type="range" id="fps" min="1" max="30" step="1" value="8"></label>
+  <span id="fpsVal">8</span>
+  <span id="status">—</span>
+</div>
+
+<script src="frames.js"></script>
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const elFrame = $('frame'), elStatus = $('status');
+
+  // ---------- estado ----------
+  let imagens = [];                    // [{nome, file, bitmap}] carregadas pelo usuário
+  let frames = window.FRAMES || [];    // frames ASCII em exibição (frames.js como ponto de partida)
+  let atual = 0, tocando = true, fps = 8, timer = null;
+
+  // Servidor disponível? (servidor.js converte com o binário, poupando o navegador)
+  let servidor = false;
+  let enviadas = false; // imagens já estão no cache do servidor?
+  if (location.protocol.startsWith('http')) {
+    fetch('/api/ping').then(r => r.json()).then(() => { servidor = true; }).catch(() => {});
+  }
+
+  // ---------- animação ----------
+  function mostrar() {
+    if (!frames.length) return;
+    elFrame.textContent = frames[atual];
+    elStatus.textContent = `frame ${atual + 1}/${frames.length}`;
+  }
+  function passo(d = 1) {
+    if (!frames.length) return;
+    atual = (atual + d + frames.length) % frames.length;
+    mostrar();
+  }
+  function agendar() {
+    clearInterval(timer);
+    if (tocando && frames.length > 1) timer = setInterval(passo, 1000 / fps);
+  }
+  function alternar() {
+    tocando = !tocando;
+    $('btnPlay').textContent = tocando ? '⏸ pausa' : '▶ play';
+    agendar();
+  }
+
+  // ---------- ajuste de fonte pra caber na tela ----------
+  function ajustar() {
+    if (!frames.length) return;
+    const linhas = frames[0].replace(/\n$/, '').split('\n');
+    const nL = linhas.length, nC = Math.max(...linhas.map(l => l.length));
+    const m = document.createElement('pre');
+    m.style.cssText = 'position:absolute;visibility:hidden;font:100px ' +
+      getComputedStyle(elFrame).fontFamily + ';line-height:1;margin:0';
+    m.textContent = 'M';
+    document.body.appendChild(m);
+    const prop = m.getBoundingClientRect().width / 100;
+    m.remove();
+    const tam = Math.min(innerHeight / nL, innerWidth / (nC * prop));
+    elFrame.style.fontSize = Math.max(1, Math.floor(tam * 100) / 100) + 'px';
+  }
+  addEventListener('resize', ajustar);
+
+  // ---------- conversão imagem → ASCII (no navegador) ----------
+  function converterUma(bitmap, cfg) {
+    const cols = cfg.largura;
+    // 0.5 ≈ proporção largura/altura de um caractere monoespaçado
+    const rows = cfg.altura > 0 ? cfg.altura
+      : Math.max(1, Math.round(cols * (bitmap.height / bitmap.width) * 0.5));
+    const cv = new OffscreenCanvas(cols, rows);
+    const cx = cv.getContext('2d', { willReadFrequently: true });
+    cx.imageSmoothingEnabled = true;
+    cx.imageSmoothingQuality = 'high';
+    cx.drawImage(bitmap, 0, 0, cols, rows);
+    const px = cx.getImageData(0, 0, cols, rows).data;
+    const mapa = cfg.mapa, n = mapa.length - 1;
+    let out = '';
+    for (let y = 0; y < rows; y++) {
+      for (let x = 0; x < cols; x++) {
+        const i = (y * cols + x) * 4;
+        const a = px[i + 3] / 255;
+        // pixel transparente vira fundo branco
+        const r = px[i] * a + 255 * (1 - a);
+        const g = px[i + 1] * a + 255 * (1 - a);
+        const b = px[i + 2] * a + 255 * (1 - a);
+        let t = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255; // 0=escuro 1=claro
+        if (cfg.negativo) t = 1 - t;
+        out += mapa[Math.round(t * n)];
+      }
+      out += '\n';
+    }
+    return out;
+  }
+
+  function lerCfg() {
+    let mapa = $('cfgMapa').value;
+    if (mapa.length < 2) mapa = '@ ';
+    return {
+      largura: Math.max(20, +$('cfgLargura').value || 400),
+      altura: Math.max(0, +$('cfgAltura').value || 0),
+      mapa,
+      negativo: $('cfgNegativo').checked,
+    };
+  }
+
+  function paraB64(file) {
+    return new Promise((res, rej) => {
+      const r = new FileReader();
+      r.onload = () => res(r.result.split(',')[1]);
+      r.onerror = rej;
+      r.readAsDataURL(file);
+    });
+  }
+
+  let convertendo = false;
+  async function reconverter() {
+    if (!imagens.length) {
+      elStatus.textContent = 'sem imagens';
+      return;
+    }
+    if (convertendo) return;
+    convertendo = true;
+    const cfg = lerCfg();
+    try {
+      if (servidor) {
+        // conversão pesada no servidor.js (binário ascii-image-converter);
+        // as imagens só são enviadas na primeira vez, ajustes reusam o cache
+        elStatus.textContent = 'convertendo (servidor)…';
+        const payload = { cfg };
+        if (!enviadas) {
+          payload.imagens = await Promise.all(
+            imagens.map(async im => ({ nome: im.nome, b64: await paraB64(im.file) }))
+          );
+        }
+        const r = await fetch('/api/converter', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const j = await r.json();
+        if (!r.ok) throw new Error(j.erro || r.status);
+        enviadas = true;
+        frames = j.frames;
+      } else {
+        // fallback: conversão no próprio navegador (canvas)
+        elStatus.textContent = 'convertendo…';
+        frames = imagens.map(im => converterUma(im.bitmap, cfg));
+      }
+      atual = 0;
+      ajustar();
+      mostrar();
+      agendar();
+    } catch (e) {
+      elStatus.textContent = 'erro: ' + e.message;
+    } finally {
+      convertendo = false;
+    }
+  }
+
+  // ---------- carregamento de imagens ----------
+  const ordemNatural = (a, b) =>
+    a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
+
+  async function carregar(files) {
+    const lista = [...files].filter(f => f.type.startsWith('image/')).sort(ordemNatural);
+    if (!lista.length) return;
+    elStatus.textContent = 'convertendo…';
+    imagens = await Promise.all(
+      lista.map(async f => ({ nome: f.name, file: f, bitmap: await createImageBitmap(f) }))
+    );
+    enviadas = false;
+    reconverter();
+    $('painel').classList.remove('fechado');
+  }
+
+  $('btnImagens').onclick = () => $('arquivos').click();
+  $('arquivos').onchange = e => carregar(e.target.files);
+
+  addEventListener('dragover', e => { e.preventDefault(); document.body.classList.add('arrastando'); });
+  addEventListener('dragleave', e => { if (!e.relatedTarget) document.body.classList.remove('arrastando'); });
+  addEventListener('drop', e => {
+    e.preventDefault();
+    document.body.classList.remove('arrastando');
+    carregar(e.dataTransfer.files);
+  });
+
+  // ---------- painel ----------
+  $('btnPainel').onclick = () => $('painel').classList.toggle('fechado');
+  $('btnConverter').onclick = reconverter;
+  $('cfgPreset').onchange = e => { $('cfgMapa').value = e.target.value; reconverter(); };
+  $('cfgCor').oninput = e => document.documentElement.style.setProperty('--verde', e.target.value);
+  // reconversão automática ao mudar valores (com um pequeno atraso)
+  let deb = null;
+  ['cfgLargura', 'cfgAltura', 'cfgMapa'].forEach(id =>
+    $(id).addEventListener('input', () => { clearTimeout(deb); deb = setTimeout(reconverter, 400); }));
+  $('cfgNegativo').onchange = reconverter;
+
+  // ---------- exportar HTML estático ----------
+  $('btnExportar').onclick = () => {
+    if (!frames.length) { alert('Nada pra exportar — carregue imagens primeiro.'); return; }
+    const cor = $('cfgCor').value;
+    const html = `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Animação ASCII</title>
+<style>
+html,body{margin:0;height:100%;background:#000;color:${cor};font-family:"Cascadia Mono","JetBrains Mono","Fira Mono",monospace;overflow:hidden}
+#t{position:absolute;inset:0;display:flex;align-items:center;justify-content:center}
+#f{margin:0;white-space:pre;line-height:1;text-shadow:0 0 6px ${cor}73}
+</style>
+</head>
+<body>
+<div id="t"><pre id="f"></pre></div>
+<script>
+var FRAMES=${JSON.stringify(frames)};
+var FPS=${fps};
+(function(){
+var el=document.getElementById('f'),i=0,tocando=true,timer=null;
+var ls=FRAMES[0].replace(/\\n$/,'').split('\\n'),nL=ls.length,nC=0;
+for(var k=0;k<ls.length;k++)if(ls[k].length>nC)nC=ls[k].length;
+function ajustar(){
+var m=document.createElement('pre');
+m.style.cssText='position:absolute;visibility:hidden;font:100px '+getComputedStyle(el).fontFamily+';line-height:1;margin:0';
+m.textContent='M';document.body.appendChild(m);
+var p=m.getBoundingClientRect().width/100;m.remove();
+el.style.fontSize=Math.max(1,Math.min(innerHeight/nL,innerWidth/(nC*p)))+'px';
+}
+function passo(d){i=(i+(d||1)+FRAMES.length)%FRAMES.length;el.textContent=FRAMES[i];}
+function agendar(){clearInterval(timer);if(tocando&&FRAMES.length>1)timer=setInterval(passo,1000/FPS);}
+addEventListener('resize',ajustar);
+addEventListener('keydown',function(e){
+if(e.code==='Space'){e.preventDefault();tocando=!tocando;agendar();}
+else if(e.key==='ArrowRight'){tocando=false;agendar();passo(1);}
+else if(e.key==='ArrowLeft'){tocando=false;agendar();passo(-1);}
+else if(e.key==='ArrowUp'){FPS=Math.min(60,FPS+1);agendar();}
+else if(e.key==='ArrowDown'){FPS=Math.max(1,FPS-1);agendar();}
+else if(e.key.toLowerCase()==='f'&&document.documentElement.requestFullscreen)document.documentElement.requestFullscreen();
+});
+ajustar();el.textContent=FRAMES[0];agendar();
+})();
+<\/script>
+</body>
+</html>`;
+    const blob = new Blob([html], { type: 'text/html' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'animacao-ascii.html';
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+
+  // ---------- barra inferior + teclado ----------
+  $('btnPlay').onclick = alternar;
+  $('btnAnt').onclick = () => { if (tocando) alternar(); passo(-1); };
+  $('btnProx').onclick = () => { if (tocando) alternar(); passo(1); };
+  $('fps').oninput = e => { fps = +e.target.value; $('fpsVal').textContent = fps; agendar(); };
+
+  addEventListener('keydown', e => {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+    if (e.code === 'Space') { e.preventDefault(); alternar(); }
+    else if (e.key === 'ArrowRight') { if (tocando) alternar(); passo(1); }
+    else if (e.key === 'ArrowLeft') { if (tocando) alternar(); passo(-1); }
+    else if (e.key === 'ArrowUp') { $('fps').value = Math.min(30, fps + 1); $('fps').oninput({ target: $('fps') }); }
+    else if (e.key === 'ArrowDown') { $('fps').value = Math.max(1, fps - 1); $('fps').oninput({ target: $('fps') }); }
+    else if (e.key.toLowerCase() === 'f') document.documentElement.requestFullscreen?.();
+    else if (e.key.toLowerCase() === 'c') $('btnPainel').onclick();
+  });
+
+  // barra some com mouse parado
+  const controles = $('controles');
+  let sumir = setTimeout(() => controles.classList.add('oculto'), 2500);
+  addEventListener('mousemove', () => {
+    controles.classList.remove('oculto');
+    clearTimeout(sumir);
+    sumir = setTimeout(() => controles.classList.add('oculto'), 2500);
+  });
+
+  // ---------- início ----------
+  if (frames.length) { ajustar(); mostrar(); agendar(); }
+  else {
+    elFrame.textContent =
+      'ASCII Studio\n\n' +
+      'Arraste imagens pra cá ou use ⚙ config → escolher imagens.\n' +
+      'Ajuste largura, mapa de chars, cor…\n' +
+      'Depois gere um HTML estático com a animação.';
+    elFrame.style.fontSize = '20px';
+  }
+})();
+</script>
+</body>
+</html>
