@@ -205,8 +205,8 @@
   <button id="btnPlay">⏸ pausa</button>
   <button id="btnAnt">⏮</button>
   <button id="btnProx">⏭</button>
-  <label>fps <input type="range" id="fps" min="1" max="30" step="1" value="8"></label>
-  <span id="fpsVal">8</span>
+  <label>fps <input type="range" id="fps" min="1" max="30" step="1" value="30"></label>
+  <span id="fpsVal">30</span>
   <span id="status">—</span>
 </div>
 
@@ -218,7 +218,7 @@
   // ---------- estado ----------
   let imagens = [];       // [{nome, file}] carregadas pelo usuário
   let frames = [];        // frames ASCII em exibição
-  let atual = 0, tocando = true, fps = 8, timer = null;
+  let atual = 0, tocando = true, fps = 30, timer = null; // sempre começa em 30 fps
 
   // id de sessão: isola o cache de imagens deste navegador no servidor
   const sessao = (crypto.randomUUID && crypto.randomUUID()) ||
@@ -324,7 +324,7 @@
       await new Promise((res, rej) => {
         const tx = bd.transaction('animacoes', 'readwrite');
         tx.objectStore('animacoes').put(
-          { frames, fps, cor: $('cfgCor').value, cfg: lerCfg() }, 'ultima');
+          { frames, cor: $('cfgCor').value, cfg: lerCfg() }, 'ultima');
         tx.oncomplete = res;
         tx.onerror = () => rej(tx.error);
       });
@@ -561,7 +561,7 @@ ajustar();el.textContent=FRAMES[0];agendar();
   $('btnPlay').onclick = alternar;
   $('btnAnt').onclick = () => { if (tocando) alternar(); passo(-1); };
   $('btnProx').onclick = () => { if (tocando) alternar(); passo(1); };
-  $('fps').oninput = e => { fps = +e.target.value; $('fpsVal').textContent = fps; agendar(); salvarDepois(); };
+  $('fps').oninput = e => { fps = +e.target.value; $('fpsVal').textContent = fps; agendar(); };
 
   addEventListener('keydown', e => {
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
@@ -602,11 +602,6 @@ ajustar();el.textContent=FRAMES[0];agendar();
     const salvo = await carregarLocal();
     if (salvo && Array.isArray(salvo.frames) && salvo.frames.length && !frames.length) {
       frames = salvo.frames;
-      if (salvo.fps >= 1) {
-        fps = Math.min(30, Math.round(salvo.fps));
-        $('fps').value = fps;
-        $('fpsVal').textContent = fps;
-      }
       if (salvo.cor) {
         $('cfgCor').value = salvo.cor;
         document.documentElement.style.setProperty('--verde', salvo.cor);
