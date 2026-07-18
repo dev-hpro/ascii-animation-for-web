@@ -199,6 +199,9 @@
   <button id="btnConverter" class="destaque">↻ reconverter</button>
   <button id="btnExportar">⬇ gerar HTML estático</button>
   <div class="dica" id="infoExporta">o HTML gerado é um arquivo único com a animação embutida</div>
+
+  <button id="btnMinha">↩ minha última animação</button>
+  <div class="dica">volta a última animação criada neste navegador</div>
 </div>
 
 <div id="controles">
@@ -597,40 +600,53 @@ ajustar();el.textContent=FRAMES[0];agendar();
     });
   }
 
-  // restaura a última animação criada NESTE navegador; usuário novo vê a demo
-  (async () => {
+  function aplicarSalvo(s) {
+    frames = s.frames;
+    if (s.cor) {
+      $('cfgCor').value = s.cor;
+      document.documentElement.style.setProperty('--verde', s.cor);
+    }
+    if (s.cfg) {
+      $('cfgLargura').value = s.cfg.largura;
+      $('cfgAltura').value = s.cfg.altura;
+      $('cfgMapa').value = s.cfg.mapa;
+      $('cfgNegativo').checked = !!s.cfg.negativo;
+    }
+    atual = 0;
+    ajustar();
+    mostrar();
+    agendar();
+  }
+
+  // a última animação criada NESTE navegador volta sob demanda, pelo painel
+  $('btnMinha').onclick = async () => {
     const salvo = await carregarLocal();
-    if (salvo && Array.isArray(salvo.frames) && salvo.frames.length && !frames.length) {
-      frames = salvo.frames;
-      if (salvo.cor) {
-        $('cfgCor').value = salvo.cor;
-        document.documentElement.style.setProperty('--verde', salvo.cor);
-      }
-      if (salvo.cfg) {
-        $('cfgLargura').value = salvo.cfg.largura;
-        $('cfgAltura').value = salvo.cfg.altura;
-        $('cfgMapa').value = salvo.cfg.mapa;
-        $('cfgNegativo').checked = !!salvo.cfg.negativo;
-      }
+    if (salvo && Array.isArray(salvo.frames) && salvo.frames.length) aplicarSalvo(salvo);
+    else elStatus.textContent = 'nenhuma animação criada neste navegador ainda';
+  };
+
+  // SEMPRE inicia com a animação de exemplo
+  (async () => {
+    elFrame.textContent = 'carregando exemplo…';
+    elFrame.style.fontSize = '20px';
+    const demo = await carregarDemo();
+    if (frames.length || imagens.length) return; // usuário já converteu algo enquanto a demo baixava
+    if (demo.length) {
+      frames = demo;
       ajustar();
       mostrar();
       agendar();
-    } else if (!frames.length) {
-      elFrame.textContent = 'carregando exemplo…';
-      elFrame.style.fontSize = '20px';
-      const demo = await carregarDemo();
-      if (demo.length && !frames.length && !imagens.length) {
-        frames = demo;
-        ajustar();
-        mostrar();
-        agendar();
-      } else if (!frames.length) {
-        elFrame.textContent =
-          'ASCII Studio\n\n' +
-          'Arraste imagens pra cá ou use ⚙ config → escolher imagens.\n' +
-          'Ajuste largura, mapa de chars, cor…\n' +
-          'Depois gere um HTML estático com a animação.';
-      }
+      return;
+    }
+    // exemplo indisponível: cai pra última animação salva, senão instruções
+    const salvo = await carregarLocal();
+    if (salvo && Array.isArray(salvo.frames) && salvo.frames.length) aplicarSalvo(salvo);
+    else {
+      elFrame.textContent =
+        'ASCII Studio\n\n' +
+        'Arraste imagens pra cá ou use ⚙ config → escolher imagens.\n' +
+        'Ajuste largura, mapa de chars, cor…\n' +
+        'Depois gere um HTML estático com a animação.';
     }
   })();
 })();
