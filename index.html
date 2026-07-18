@@ -195,13 +195,13 @@
 
   // A conversão é sempre feita no servidor (servidor.js + binário ascii-image-converter).
   let servidor = false;
-  let limites = null;  // { maxArquivos, maxTamanhoMb } informados pelo servidor
+  let limites = null;  // { maxArquivos, maxTamanhoKb } informados pelo servidor
   let enviadas = false; // imagens já estão no cache do servidor?
-  if (location.protocol.startsWith('http')) {
-    fetch('api/ping').then(r => r.json())
-      .then(j => { servidor = !!(j.ok && j.conversor); limites = j.limites || null; })
-      .catch(() => {});
-  }
+  const pingPronto = location.protocol.startsWith('http')
+    ? fetch('api/ping').then(r => r.json())
+        .then(j => { servidor = !!(j.ok && j.conversor); limites = j.limites || null; })
+        .catch(() => {})
+    : Promise.resolve();
 
   // ---------- animação ----------
   function mostrar() {
@@ -314,27 +314,79 @@
     }
   }
 
+  // ---------- compressão no navegador ----------
+  // Arquivo acima do limite do servidor? O navegador redimensiona e reencoda
+  // em JPEG até caber — a conversão ASCII usa no máximo 800 colunas, então dá
+  // pra reduzir bastante sem perder detalhe visível no resultado.
+  function criarCanvas(w, h) {
+    if (typeof OffscreenCanvas !== 'undefined') return new OffscreenCanvas(w, h);
+    const c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    return c;
+  }
+  function lerBitmap(file) {
+    if (typeof createImageBitmap === 'function') return createImageBitmap(file);
+    return new Promise((res, rej) => {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => { URL.revokeObjectURL(url); res(img); };
+      img.onerror = () => { URL.revokeObjectURL(url); rej(new Error('falha ao ler ' + file.name)); };
+      img.src = url;
+    });
+  }
+  function paraBlob(cv, qualidade) {
+    if (cv.convertToBlob) return cv.convertToBlob({ type: 'image/jpeg', quality: qualidade });
+    return new Promise(res => cv.toBlob(res, 'image/jpeg', qualidade));
+  }
+  async function comprimir(file, maxB) {
+    const bm = await lerBitmap(file);
+    const bw = bm.width || bm.naturalWidth, bh = bm.height || bm.naturalHeight;
+    const larguraBase = Math.min(bw, 1600);
+    for (const escala of [1, 0.7, 0.5, 0.35, 0.25, 0.15]) {
+      const w = Math.max(1, Math.round(larguraBase * escala));
+      const h = Math.max(1, Math.round(w * bh / bw));
+      const cv = criarCanvas(w, h);
+      const cx = cv.getContext('2d');
+      cx.fillStyle = '#fff'; // JPEG não tem transparência: fundo branco
+      cx.fillRect(0, 0, w, h);
+      cx.drawImage(bm, 0, 0, w, h);
+      for (const q of [0.8, 0.6, 0.4]) {
+        const blob = await paraBlob(cv, q);
+        if (blob.size <= maxB) return blob;
+      }
+    }
+    throw new Error(`não deu pra comprimir "${file.name}" abaixo do limite`);
+  }
+
   // ---------- carregamento de imagens ----------
   const ordemNatural = (a, b) =>
     a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
 
-  function carregar(files) {
+  async function carregar(files) {
     const lista = [...files].filter(f => f.type.startsWith('image/')).sort(ordemNatural);
     if (!lista.length) return;
-    // valida os limites informados pelo servidor antes de enviar
-    if (limites) {
-      if (lista.length > limites.maxArquivos) {
-        elStatus.textContent = `erro: máximo de ${limites.maxArquivos} arquivos por conversão`;
-        return;
-      }
-      const maxB = limites.maxTamanhoMb * 1024 * 1024;
-      const grande = lista.find(f => f.size > maxB);
-      if (grande) {
-        elStatus.textContent = `erro: "${grande.name}" excede ${limites.maxTamanhoMb} MB`;
-        return;
-      }
+    await pingPronto; // garante que os limites do servidor já chegaram
+    if (limites && lista.length > limites.maxArquivos) {
+      elStatus.textContent = `erro: máximo de ${limites.maxArquivos} arquivos por conversão`;
+      return;
     }
-    imagens = lista.map(f => ({ nome: f.name, file: f }));
+    const maxB = limites ? limites.maxTamanhoKb * 1024 : Infinity;
+    try {
+      const novas = [];
+      for (let i = 0; i < lista.length; i++) {
+        const f = lista[i];
+        if (f.size > maxB) {
+          elStatus.textContent = `comprimindo ${i + 1}/${lista.length} (${f.name})…`;
+          novas.push({ nome: f.name.replace(/\.[^.]+$/, '') + '.jpg', file: await comprimir(f, maxB) });
+        } else {
+          novas.push({ nome: f.name, file: f });
+        }
+      }
+      imagens = novas;
+    } catch (e) {
+      elStatus.textContent = 'erro: ' + e.message;
+      return;
+    }
     enviadas = false;
     reconverter();
     $('painel').classList.remove('fechado');

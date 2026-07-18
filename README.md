@@ -28,9 +28,9 @@ Toda a conversão é feita no servidor pelo binário [ascii-image-converter](htt
 | `PORT` | `8000` | porta do servidor |
 | `HOST` | `127.0.0.1` | use `0.0.0.0` pra expor na rede/container |
 | `MAX_ARQUIVOS` | `200` | nº máximo de arquivos por conversão |
-| `MAX_TAMANHO_MB` | `5` | tamanho máximo por arquivo, em MB |
+| `MAX_TAMANHO_KB` | `500` | tamanho máximo por arquivo, em KB |
 
-Os limites evitam sobrecarga do servidor: pedidos acima deles são recusados com HTTP 413, e a interface valida antes de enviar.
+Os limites evitam sobrecarga do servidor: pedidos acima deles são recusados com HTTP 413. Arquivos maiores que `MAX_TAMANHO_KB` não são recusados na interface — o navegador do usuário comprime (redimensiona e reencoda em JPEG) até caber no limite antes de enviar.
 
 ### Deploy no Coolify (ou qualquer Docker)
 
@@ -38,7 +38,7 @@ O repositório traz um `Dockerfile` pronto que compila o `ascii-image-converter`
 
 1. No Coolify, crie um recurso apontando pra este repositório e escolha **Dockerfile** como build pack.
 2. A porta exposta é a **8000** (o `HOST=0.0.0.0` já vem definido na imagem).
-3. Ajuste `MAX_ARQUIVOS` e `MAX_TAMANHO_MB` nas variáveis de ambiente, se quiser.
+3. Ajuste `MAX_ARQUIVOS` e `MAX_TAMANHO_KB` nas variáveis de ambiente, se quiser.
 
 O healthcheck da imagem usa `GET /api/ping`.
 

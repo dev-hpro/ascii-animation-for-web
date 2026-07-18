@@ -15,7 +15,7 @@ ENV HOST=0.0.0.0 \
     PORT=8000
 # Limites contra sobrecarga — sobrescreva nas variáveis de ambiente do Coolify
 ENV MAX_ARQUIVOS=200 \
-    MAX_TAMANHO_MB=5
+    MAX_TAMANHO_KB=500
 
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s \

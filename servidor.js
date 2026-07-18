@@ -18,10 +18,11 @@ const PORTA = +process.argv[2] || +process.env.PORT || 8000;
 
 // ---------- limites (contra sobrecarga) ----------
 // MAX_ARQUIVOS    — nº máximo de arquivos por conversão (padrão 200)
-// MAX_TAMANHO_MB  — tamanho máximo por arquivo, em MB (padrão 5)
+// MAX_TAMANHO_KB  — tamanho máximo por arquivo, em KB (padrão 500);
+//                   acima disso o navegador comprime antes de enviar
 const MAX_ARQUIVOS = Math.max(1, Math.floor(+process.env.MAX_ARQUIVOS) || 200);
-const MAX_TAMANHO_MB = +process.env.MAX_TAMANHO_MB > 0 ? +process.env.MAX_TAMANHO_MB : 5;
-const MAX_TAMANHO_ARQUIVO = Math.round(MAX_TAMANHO_MB * 1024 * 1024);
+const MAX_TAMANHO_KB = +process.env.MAX_TAMANHO_KB > 0 ? +process.env.MAX_TAMANHO_KB : 500;
+const MAX_TAMANHO_ARQUIVO = Math.round(MAX_TAMANHO_KB * 1024);
 // corpo JSON: arquivos em base64 (~4/3 do tamanho) + folga pra estrutura
 const LIMITE_BODY = Math.ceil(MAX_ARQUIVOS * MAX_TAMANHO_ARQUIVO * 4 / 3) + 1024 * 1024;
 
@@ -140,7 +141,7 @@ const servidor = http.createServer(async (req, res) => {
         ok: true,
         conversor: true,
         binario: BINARIO,
-        limites: { maxArquivos: MAX_ARQUIVOS, maxTamanhoMb: MAX_TAMANHO_MB },
+        limites: { maxArquivos: MAX_ARQUIVOS, maxTamanhoKb: MAX_TAMANHO_KB },
       }));
       return;
     }
@@ -163,7 +164,7 @@ const servidor = http.createServer(async (req, res) => {
           const tam = Math.floor(String(im.b64 || '').length * 3 / 4); // tamanho decodificado aprox.
           if (tam > MAX_TAMANHO_ARQUIVO) {
             res.writeHead(413, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ erro: `"${im.nome || 'arquivo'}" excede o limite de ${MAX_TAMANHO_MB} MB por arquivo` }));
+            res.end(JSON.stringify({ erro: `"${im.nome || 'arquivo'}" excede o limite de ${MAX_TAMANHO_KB} KB por arquivo` }));
             return;
           }
         }
@@ -209,5 +210,5 @@ const HOST = process.env.HOST || '127.0.0.1';
 servidor.listen(PORTA, HOST, () => {
   console.log(`ASCII Studio no ar: http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORTA}`);
   console.log(`binário: ${BINARIO}`);
-  console.log(`limites: ${MAX_ARQUIVOS} arquivos, ${MAX_TAMANHO_MB} MB por arquivo (MAX_ARQUIVOS / MAX_TAMANHO_MB)`);
+  console.log(`limites: ${MAX_ARQUIVOS} arquivos, ${MAX_TAMANHO_KB} KB por arquivo (MAX_ARQUIVOS / MAX_TAMANHO_KB)`);
 });
