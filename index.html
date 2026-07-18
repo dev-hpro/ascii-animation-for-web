@@ -182,16 +182,19 @@
   <span id="status">—</span>
 </div>
 
-<script src="frames.js"></script>
 <script>
 (() => {
   const $ = id => document.getElementById(id);
   const elFrame = $('frame'), elStatus = $('status');
 
   // ---------- estado ----------
-  let imagens = [];                    // [{nome, file, bitmap}] carregadas pelo usuário
-  let frames = window.FRAMES || [];    // frames ASCII em exibição (frames.js como ponto de partida)
+  let imagens = [];       // [{nome, file}] carregadas pelo usuário
+  let frames = [];        // frames ASCII em exibição
   let atual = 0, tocando = true, fps = 8, timer = null;
+
+  // id de sessão: isola o cache de imagens deste navegador no servidor
+  const sessao = (crypto.randomUUID && crypto.randomUUID()) ||
+    ('s-' + Date.now() + '-' + Math.random().toString(36).slice(2));
 
   // A conversão é sempre feita no servidor (servidor.js + binário ascii-image-converter).
   let servidor = false;
@@ -271,14 +274,54 @@
     return fetch('api/converter', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({ sessao, ...payload }),
     });
+  }
+
+  // ---------- animação salva neste navegador (IndexedDB) ----------
+  // A última animação criada fica só aqui, no navegador do usuário —
+  // o servidor não guarda nada.
+  function abrirBD() {
+    return new Promise((res, rej) => {
+      const rq = indexedDB.open('ascii-studio', 1);
+      rq.onupgradeneeded = () => rq.result.createObjectStore('animacoes');
+      rq.onsuccess = () => res(rq.result);
+      rq.onerror = () => rej(rq.error);
+    });
+  }
+  async function salvarLocal() {
+    if (!frames.length) return;
+    try {
+      const bd = await abrirBD();
+      await new Promise((res, rej) => {
+        const tx = bd.transaction('animacoes', 'readwrite');
+        tx.objectStore('animacoes').put(
+          { frames, fps, cor: $('cfgCor').value, cfg: lerCfg() }, 'ultima');
+        tx.oncomplete = res;
+        tx.onerror = () => rej(tx.error);
+      });
+      bd.close();
+    } catch {}
+  }
+  async function carregarLocal() {
+    try {
+      const bd = await abrirBD();
+      const dados = await new Promise((res, rej) => {
+        const rq = bd.transaction('animacoes').objectStore('animacoes').get('ultima');
+        rq.onsuccess = () => res(rq.result);
+        rq.onerror = () => rej(rq.error);
+      });
+      bd.close();
+      return dados;
+    } catch { return null; }
   }
 
   let convertendo = false;
   async function reconverter() {
     if (!imagens.length) {
-      elStatus.textContent = 'sem imagens';
+      elStatus.textContent = frames.length
+        ? 'carregue as imagens de novo pra reconverter'
+        : 'sem imagens';
       return;
     }
     if (convertendo) return;
@@ -307,6 +350,7 @@
       ajustar();
       mostrar();
       agendar();
+      salvarLocal();
     } catch (e) {
       elStatus.textContent = 'erro: ' + e.message;
     } finally {
@@ -407,7 +451,12 @@
   $('btnPainel').onclick = () => $('painel').classList.toggle('fechado');
   $('btnConverter').onclick = reconverter;
   $('cfgPreset').onchange = e => { $('cfgMapa').value = e.target.value; reconverter(); };
-  $('cfgCor').oninput = e => document.documentElement.style.setProperty('--verde', e.target.value);
+  let debSalvar = null;
+  const salvarDepois = () => { clearTimeout(debSalvar); debSalvar = setTimeout(salvarLocal, 500); };
+  $('cfgCor').oninput = e => {
+    document.documentElement.style.setProperty('--verde', e.target.value);
+    salvarDepois();
+  };
   // reconversão automática ao mudar valores (com um pequeno atraso)
   let deb = null;
   ['cfgLargura', 'cfgAltura', 'cfgMapa'].forEach(id =>
@@ -473,7 +522,7 @@ ajustar();el.textContent=FRAMES[0];agendar();
   $('btnPlay').onclick = alternar;
   $('btnAnt').onclick = () => { if (tocando) alternar(); passo(-1); };
   $('btnProx').onclick = () => { if (tocando) alternar(); passo(1); };
-  $('fps').oninput = e => { fps = +e.target.value; $('fpsVal').textContent = fps; agendar(); };
+  $('fps').oninput = e => { fps = +e.target.value; $('fpsVal').textContent = fps; agendar(); salvarDepois(); };
 
   addEventListener('keydown', e => {
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
@@ -496,15 +545,38 @@ ajustar();el.textContent=FRAMES[0];agendar();
   });
 
   // ---------- início ----------
-  if (frames.length) { ajustar(); mostrar(); agendar(); }
-  else {
-    elFrame.textContent =
-      'ASCII Studio\n\n' +
-      'Arraste imagens pra cá ou use ⚙ config → escolher imagens.\n' +
-      'Ajuste largura, mapa de chars, cor…\n' +
-      'Depois gere um HTML estático com a animação.';
-    elFrame.style.fontSize = '20px';
-  }
+  // restaura a última animação criada NESTE navegador; usuário novo começa vazio
+  (async () => {
+    const salvo = await carregarLocal();
+    if (salvo && Array.isArray(salvo.frames) && salvo.frames.length && !frames.length) {
+      frames = salvo.frames;
+      if (salvo.fps >= 1) {
+        fps = Math.min(30, Math.round(salvo.fps));
+        $('fps').value = fps;
+        $('fpsVal').textContent = fps;
+      }
+      if (salvo.cor) {
+        $('cfgCor').value = salvo.cor;
+        document.documentElement.style.setProperty('--verde', salvo.cor);
+      }
+      if (salvo.cfg) {
+        $('cfgLargura').value = salvo.cfg.largura;
+        $('cfgAltura').value = salvo.cfg.altura;
+        $('cfgMapa').value = salvo.cfg.mapa;
+        $('cfgNegativo').checked = !!salvo.cfg.negativo;
+      }
+      ajustar();
+      mostrar();
+      agendar();
+    } else if (!frames.length) {
+      elFrame.textContent =
+        'ASCII Studio\n\n' +
+        'Arraste imagens pra cá ou use ⚙ config → escolher imagens.\n' +
+        'Ajuste largura, mapa de chars, cor…\n' +
+        'Depois gere um HTML estático com a animação.';
+      elFrame.style.fontSize = '20px';
+    }
+  })();
 })();
 </script>
 </body>

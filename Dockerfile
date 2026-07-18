@@ -9,7 +9,7 @@ FROM node:22-alpine
 COPY --from=conversor /go/bin/ascii-image-converter /usr/local/bin/ascii-image-converter
 
 WORKDIR /app
-COPY package.json servidor.js index.html frames.js ./
+COPY package.json servidor.js index.html ./
 
 ENV HOST=0.0.0.0 \
     PORT=8000
