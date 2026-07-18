@@ -37,6 +37,10 @@
     bottom: 16px;
     transform: translateX(-50%);
     display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    max-width: calc(100vw - 16px);
+    box-sizing: border-box;
     gap: 12px;
     align-items: center;
     padding: 10px 18px;
@@ -49,6 +53,17 @@
     z-index: 5;
   }
   #controles.oculto { opacity: 0; pointer-events: none; }
+  #controles label { display: flex; align-items: center; gap: 6px; }
+  @media (max-width: 600px) {
+    #controles {
+      bottom: 8px;
+      gap: 8px;
+      padding: 8px 10px;
+      font-size: 12px;
+    }
+    #controles input[type=range] { width: min(38vw, 130px); }
+    #status { min-width: 0; text-align: center; }
+  }
 
   /* painel de configuração */
   #painel {
@@ -56,7 +71,7 @@
     top: 0;
     right: 0;
     bottom: 0;
-    width: 300px;
+    width: min(300px, 100vw);
     box-sizing: border-box;
     padding: 18px;
     background: rgba(0, 15, 4, .96);
@@ -112,6 +127,17 @@
     right: 14px;
     z-index: 11;
   }
+  #credito {
+    position: fixed;
+    top: 14px;
+    left: 14px;
+    z-index: 11;
+    color: var(--verde);
+    font-size: 13px;
+    text-decoration: none;
+    opacity: .65;
+  }
+  #credito:hover { opacity: 1; text-decoration: underline; }
   #status { min-width: 110px; text-align: right; }
   #soltar {
     position: absolute;
@@ -131,6 +157,8 @@
 <body>
 <div id="tela"><pre id="frame">carregando…</pre></div>
 <div id="soltar">solte as imagens aqui</div>
+
+<a id="credito" href="https://henrique.pro/toolz" target="_blank" rel="noopener">henrique.pro/toolz</a>
 
 <button id="btnPainel">⚙ config</button>
 
@@ -182,16 +210,19 @@
   <span id="status">—</span>
 </div>
 
-<script src="frames.js"></script>
 <script>
 (() => {
   const $ = id => document.getElementById(id);
   const elFrame = $('frame'), elStatus = $('status');
 
   // ---------- estado ----------
-  let imagens = [];                    // [{nome, file, bitmap}] carregadas pelo usuário
-  let frames = window.FRAMES || [];    // frames ASCII em exibição (frames.js como ponto de partida)
+  let imagens = [];       // [{nome, file}] carregadas pelo usuário
+  let frames = [];        // frames ASCII em exibição
   let atual = 0, tocando = true, fps = 8, timer = null;
+
+  // id de sessão: isola o cache de imagens deste navegador no servidor
+  const sessao = (crypto.randomUUID && crypto.randomUUID()) ||
+    ('s-' + Date.now() + '-' + Math.random().toString(36).slice(2));
 
   // A conversão é sempre feita no servidor (servidor.js + binário ascii-image-converter).
   let servidor = false;
@@ -271,14 +302,54 @@
     return fetch('api/converter', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({ sessao, ...payload }),
     });
+  }
+
+  // ---------- animação salva neste navegador (IndexedDB) ----------
+  // A última animação criada fica só aqui, no navegador do usuário —
+  // o servidor não guarda nada.
+  function abrirBD() {
+    return new Promise((res, rej) => {
+      const rq = indexedDB.open('ascii-studio', 1);
+      rq.onupgradeneeded = () => rq.result.createObjectStore('animacoes');
+      rq.onsuccess = () => res(rq.result);
+      rq.onerror = () => rej(rq.error);
+    });
+  }
+  async function salvarLocal() {
+    if (!frames.length) return;
+    try {
+      const bd = await abrirBD();
+      await new Promise((res, rej) => {
+        const tx = bd.transaction('animacoes', 'readwrite');
+        tx.objectStore('animacoes').put(
+          { frames, fps, cor: $('cfgCor').value, cfg: lerCfg() }, 'ultima');
+        tx.oncomplete = res;
+        tx.onerror = () => rej(tx.error);
+      });
+      bd.close();
+    } catch {}
+  }
+  async function carregarLocal() {
+    try {
+      const bd = await abrirBD();
+      const dados = await new Promise((res, rej) => {
+        const rq = bd.transaction('animacoes').objectStore('animacoes').get('ultima');
+        rq.onsuccess = () => res(rq.result);
+        rq.onerror = () => rej(rq.error);
+      });
+      bd.close();
+      return dados;
+    } catch { return null; }
   }
 
   let convertendo = false;
   async function reconverter() {
     if (!imagens.length) {
-      elStatus.textContent = 'sem imagens';
+      elStatus.textContent = frames.length
+        ? 'carregue as imagens de novo pra reconverter'
+        : 'sem imagens';
       return;
     }
     if (convertendo) return;
@@ -307,6 +378,7 @@
       ajustar();
       mostrar();
       agendar();
+      salvarLocal();
     } catch (e) {
       elStatus.textContent = 'erro: ' + e.message;
     } finally {
@@ -407,7 +479,12 @@
   $('btnPainel').onclick = () => $('painel').classList.toggle('fechado');
   $('btnConverter').onclick = reconverter;
   $('cfgPreset').onchange = e => { $('cfgMapa').value = e.target.value; reconverter(); };
-  $('cfgCor').oninput = e => document.documentElement.style.setProperty('--verde', e.target.value);
+  let debSalvar = null;
+  const salvarDepois = () => { clearTimeout(debSalvar); debSalvar = setTimeout(salvarLocal, 500); };
+  $('cfgCor').oninput = e => {
+    document.documentElement.style.setProperty('--verde', e.target.value);
+    salvarDepois();
+  };
   // reconversão automática ao mudar valores (com um pequeno atraso)
   let deb = null;
   ['cfgLargura', 'cfgAltura', 'cfgMapa'].forEach(id =>
@@ -473,7 +550,7 @@ ajustar();el.textContent=FRAMES[0];agendar();
   $('btnPlay').onclick = alternar;
   $('btnAnt').onclick = () => { if (tocando) alternar(); passo(-1); };
   $('btnProx').onclick = () => { if (tocando) alternar(); passo(1); };
-  $('fps').oninput = e => { fps = +e.target.value; $('fpsVal').textContent = fps; agendar(); };
+  $('fps').oninput = e => { fps = +e.target.value; $('fpsVal').textContent = fps; agendar(); salvarDepois(); };
 
   addEventListener('keydown', e => {
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
@@ -486,25 +563,70 @@ ajustar();el.textContent=FRAMES[0];agendar();
     else if (e.key.toLowerCase() === 'c') $('btnPainel').onclick();
   });
 
-  // barra some com mouse parado
+  // barra some com mouse/toque parado (e volta com movimento ou toque)
   const controles = $('controles');
   let sumir = setTimeout(() => controles.classList.add('oculto'), 2500);
-  addEventListener('mousemove', () => {
+  const acordar = () => {
     controles.classList.remove('oculto');
     clearTimeout(sumir);
     sumir = setTimeout(() => controles.classList.add('oculto'), 2500);
-  });
+  };
+  addEventListener('mousemove', acordar);
+  addEventListener('touchstart', acordar, { passive: true });
 
   // ---------- início ----------
-  if (frames.length) { ajustar(); mostrar(); agendar(); }
-  else {
-    elFrame.textContent =
-      'ASCII Studio\n\n' +
-      'Arraste imagens pra cá ou use ⚙ config → escolher imagens.\n' +
-      'Ajuste largura, mapa de chars, cor…\n' +
-      'Depois gere um HTML estático com a animação.';
-    elFrame.style.fontSize = '20px';
+  // animação de exemplo (frames.js), carregada sob demanda pra não travar a página
+  function carregarDemo() {
+    return new Promise(res => {
+      const s = document.createElement('script');
+      s.src = 'frames.js';
+      s.onload = () => res(Array.isArray(window.FRAMES) ? window.FRAMES : []);
+      s.onerror = () => res([]);
+      document.head.appendChild(s);
+    });
   }
+
+  // restaura a última animação criada NESTE navegador; usuário novo vê a demo
+  (async () => {
+    const salvo = await carregarLocal();
+    if (salvo && Array.isArray(salvo.frames) && salvo.frames.length && !frames.length) {
+      frames = salvo.frames;
+      if (salvo.fps >= 1) {
+        fps = Math.min(30, Math.round(salvo.fps));
+        $('fps').value = fps;
+        $('fpsVal').textContent = fps;
+      }
+      if (salvo.cor) {
+        $('cfgCor').value = salvo.cor;
+        document.documentElement.style.setProperty('--verde', salvo.cor);
+      }
+      if (salvo.cfg) {
+        $('cfgLargura').value = salvo.cfg.largura;
+        $('cfgAltura').value = salvo.cfg.altura;
+        $('cfgMapa').value = salvo.cfg.mapa;
+        $('cfgNegativo').checked = !!salvo.cfg.negativo;
+      }
+      ajustar();
+      mostrar();
+      agendar();
+    } else if (!frames.length) {
+      elFrame.textContent = 'carregando exemplo…';
+      elFrame.style.fontSize = '20px';
+      const demo = await carregarDemo();
+      if (demo.length && !frames.length && !imagens.length) {
+        frames = demo;
+        ajustar();
+        mostrar();
+        agendar();
+      } else if (!frames.length) {
+        elFrame.textContent =
+          'ASCII Studio\n\n' +
+          'Arraste imagens pra cá ou use ⚙ config → escolher imagens.\n' +
+          'Ajuste largura, mapa de chars, cor…\n' +
+          'Depois gere um HTML estático com a animação.';
+      }
+    }
+  })();
 })();
 </script>
 </body>

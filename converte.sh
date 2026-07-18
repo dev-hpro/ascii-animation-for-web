@@ -48,4 +48,4 @@ JS="$DIR/frames.js"
 } > "$JS"
 
 echo "Pronto: $ok/${#imagens[@]} imagens convertidas em $OUT_DIR"
-echo "frames.js atualizado — abra o index.html direto no navegador"
+echo "frames.js atualizado (uso avulso — a interface web não depende dele)"

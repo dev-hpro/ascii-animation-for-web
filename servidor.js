@@ -11,6 +11,7 @@ const http = require('http');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const zlib = require('zlib');
 const { spawnSync } = require('child_process');
 
 const DIR = __dirname;
@@ -47,21 +48,39 @@ if (!BINARIO) {
   process.exit(1);
 }
 
-// ---------- cache das imagens enviadas ----------
-// O navegador manda as imagens uma vez; ajustes de config reusam o cache,
-// então mudar largura/mapa/etc. não re-envia nada.
-let cache = null; // { dir, arquivos: [caminho...] }
+// ---------- cache de imagens por sessão ----------
+// Cada navegador gera um id de sessão e manda as imagens uma vez; ajustes de
+// config reusam o cache daquela sessão. Vários usuários podem usar ao mesmo
+// tempo sem ver as imagens uns dos outros. Nada é persistido: sessões paradas
+// expiram e tudo morre com o processo.
+const SESSAO_TTL = 30 * 60 * 1000; // 30 min sem uso
+const MAX_SESSOES = 100;
+const caches = new Map(); // sessao -> { dir, arquivos: [caminho...], usado }
 
-function limparCache() {
-  if (cache) fs.rmSync(cache.dir, { recursive: true, force: true });
-  cache = null;
+function limparSessao(sessao) {
+  const c = caches.get(sessao);
+  if (c) fs.rmSync(c.dir, { recursive: true, force: true });
+  caches.delete(sessao);
 }
-process.on('exit', limparCache);
+function limparTudo() {
+  for (const s of [...caches.keys()]) limparSessao(s);
+}
+process.on('exit', limparTudo);
 process.on('SIGINT', () => process.exit(0));
 process.on('SIGTERM', () => process.exit(0));
+setInterval(() => {
+  const agora = Date.now();
+  for (const [s, c] of caches) if (agora - c.usado > SESSAO_TTL) limparSessao(s);
+}, 5 * 60 * 1000).unref();
 
-function salvarImagens(imagens) {
-  limparCache();
+function salvarImagens(sessao, imagens) {
+  limparSessao(sessao);
+  // muita gente ao mesmo tempo? derruba a sessão parada há mais tempo
+  while (caches.size >= MAX_SESSOES) {
+    let velha = null;
+    for (const [s, c] of caches) if (!velha || c.usado < caches.get(velha).usado) velha = s;
+    limparSessao(velha);
+  }
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ascii-studio-'));
   const arquivos = imagens.map((im, i) => {
     const ext = (path.extname(im.nome || '') || '.png').toLowerCase();
@@ -69,11 +88,11 @@ function salvarImagens(imagens) {
     fs.writeFileSync(f, Buffer.from(im.b64, 'base64'));
     return f;
   });
-  cache = { dir, arquivos };
+  caches.set(sessao, { dir, arquivos, usado: Date.now() });
 }
 
 // ---------- conversão ----------
-function converter(cfg) {
+function converter(cache, cfg) {
   const out = path.join(cache.dir, 'out');
   fs.rmSync(out, { recursive: true, force: true });
   fs.mkdirSync(out);
@@ -93,19 +112,6 @@ function converter(cfg) {
     frames.push(fs.readFileSync(txt, 'utf8'));
   }
   return frames;
-}
-
-// Mantém frames/ e frames.js do projeto em dia com a última conversão
-function persistir(frames) {
-  const dirFrames = path.join(DIR, 'frames');
-  fs.rmSync(dirFrames, { recursive: true, force: true });
-  fs.mkdirSync(dirFrames);
-  frames.forEach((f, i) => fs.writeFileSync(path.join(dirFrames, `${i + 1}.txt`), f));
-  fs.writeFileSync(
-    path.join(DIR, 'frames.js'),
-    '// gerado pelo servidor.js — não editar na mão\nwindow.FRAMES = ' +
-      JSON.stringify(frames) + ';\n'
-  );
 }
 
 // ---------- http ----------
@@ -154,6 +160,12 @@ const servidor = http.createServer(async (req, res) => {
         mapa: String(body.cfg?.mapa || '@%#*+=:-. '),
         negativo: !!body.cfg?.negativo,
       };
+      const sessao = String(body.sessao || '').slice(0, 64);
+      if (!sessao) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ erro: 'sessão não informada' }));
+        return;
+      }
       if (Array.isArray(body.imagens) && body.imagens.length) {
         if (body.imagens.length > MAX_ARQUIVOS) {
           res.writeHead(413, { 'Content-Type': 'application/json' });
@@ -168,18 +180,19 @@ const servidor = http.createServer(async (req, res) => {
             return;
           }
         }
-        salvarImagens(body.imagens);
+        salvarImagens(sessao, body.imagens);
       }
+      const cache = caches.get(sessao);
       if (!cache) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ erro: 'nenhuma imagem enviada ainda' }));
         return;
       }
+      cache.usado = Date.now();
       const inicio = Date.now();
-      const frames = converter(cfg);
-      persistir(frames);
+      const frames = converter(cache, cfg);
       console.log(`convertido: ${frames.length} frames em ${Date.now() - inicio}ms ` +
-        `(largura=${cfg.largura} altura=${cfg.altura || 'auto'} negativo=${cfg.negativo})`);
+        `(largura=${cfg.largura} altura=${cfg.altura || 'auto'} negativo=${cfg.negativo} sessões=${caches.size})`);
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ frames }));
       return;
@@ -191,8 +204,19 @@ const servidor = http.createServer(async (req, res) => {
       alvo = path.normalize(alvo).replace(/^(\.\.[/\\])+/, '');
       const arquivo = path.join(DIR, alvo);
       if (arquivo.startsWith(DIR) && fs.existsSync(arquivo) && fs.statSync(arquivo).isFile()) {
-        res.writeHead(200, { 'Content-Type': MIME[path.extname(arquivo)] || 'application/octet-stream' });
-        fs.createReadStream(arquivo).pipe(res);
+        const ext = path.extname(arquivo);
+        const cabecalhos = { 'Content-Type': MIME[ext] || 'application/octet-stream' };
+        // texto vai gzipado (frames.js de exemplo encolhe ~20x)
+        const gzip = ['.html', '.js', '.css', '.txt'].includes(ext) &&
+          /\bgzip\b/.test(req.headers['accept-encoding'] || '');
+        if (gzip) {
+          cabecalhos['Content-Encoding'] = 'gzip';
+          res.writeHead(200, cabecalhos);
+          fs.createReadStream(arquivo).pipe(zlib.createGzip()).pipe(res);
+        } else {
+          res.writeHead(200, cabecalhos);
+          fs.createReadStream(arquivo).pipe(res);
+        }
         return;
       }
     }

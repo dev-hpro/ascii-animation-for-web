@@ -21,6 +21,10 @@ Projeto para transformar frames de imagem de qualquer formato em animação ASCI
 
 Toda a conversão é feita no servidor pelo binário [ascii-image-converter](https://github.com/TheZoraiz/ascii-image-converter/releases) — nada roda no navegador do cliente. O servidor procura o binário no PATH, em `~/.local/bin/` ou na pasta do projeto, e não sobe sem ele (no deploy com o Dockerfile ele já vem instalado).
 
+### Multiusuário, sem estado no servidor
+
+O gerador é feito pra várias pessoas usarem ao mesmo tempo: cada navegador tem uma sessão isolada no servidor (cache temporário das imagens enviadas, que expira em 30 min sem uso e nunca é persistido). A última animação criada fica salva **só no navegador de quem criou** (IndexedDB) e reaparece quando a pessoa volta; usuários novos veem a animação de exemplo (`frames.js`, servida com gzip e carregada sem travar a página).
+
 ### Variáveis de ambiente
 
 | Variável | Padrão | Descrição |
@@ -41,7 +45,7 @@ Funciona com os dois build packs — em ambos, defina **Ports Exposes = 8000** n
 
 ### Conversão em lote pela linha de comando
 
-O `converte.sh` converte todas as imagens da pasta `input/` para `frames/` e gera o `frames.js` (requer o binário `ascii-image-converter`).
+O `converte.sh` converte todas as imagens da pasta `input/` para `frames/` e gera um `frames.js` com os frames embutidos, pra usos avulsos fora da interface (requer o binário `ascii-image-converter`). A interface web não usa esses arquivos.
 
 ***
 
