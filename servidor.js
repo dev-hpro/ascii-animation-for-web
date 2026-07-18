@@ -17,7 +17,7 @@ const DIR = __dirname;
 const PORTA = +process.argv[2] || 8000;
 const LIMITE_BODY = 300 * 1024 * 1024; // 300 MB
 
-// ---------- localizar o binário (mesma ordem da skill ascii-frames) ----------
+// ---------- localizar o binário ----------
 function acharBinario() {
   const candidatos = [
     path.join(DIR, 'ascii-image-converter'),
