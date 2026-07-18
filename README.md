@@ -5,7 +5,7 @@ Projeto para transformar frames de imagem de qualquer formato em animação ASCI
 
 ## Como usar
 
-1. Transforme o vídeo que você quer em PNG, JPG ou qualquer outro formato de imagem — use algum programa para extrair os frames (por exemplo, o kdenlive).
+1. Transforme o vídeo que você quer em imagens PNG, JPG, GIF, WebP ou BMP — use algum programa para extrair os frames (por exemplo, o kdenlive). São os únicos formatos aceitos: SVG e outros tipos são bloqueados por segurança (o servidor valida a assinatura binária de cada arquivo).
 2. Rode o servidor (precisa do Node e do binário `ascii-image-converter` — veja abaixo):
 
    ```bash

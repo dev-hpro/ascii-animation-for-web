@@ -167,7 +167,7 @@
 
   <button id="btnImagens">📂 escolher imagens…</button>
   <div class="dica">ou arraste os PNGs pra tela · ordem natural dos nomes</div>
-  <input type="file" id="arquivos" accept="image/*" multiple hidden>
+  <input type="file" id="arquivos" accept="image/png,image/jpeg,image/gif,image/webp,image/bmp" multiple hidden>
 
   <label>largura (chars por linha)</label>
   <input type="number" id="cfgLargura" min="20" max="800" step="10" value="400">
@@ -205,8 +205,8 @@
   <button id="btnPlay">⏸ pausa</button>
   <button id="btnAnt">⏮</button>
   <button id="btnProx">⏭</button>
-  <label>fps <input type="range" id="fps" min="1" max="30" step="1" value="8"></label>
-  <span id="fpsVal">8</span>
+  <label>fps <input type="range" id="fps" min="1" max="30" step="1" value="30"></label>
+  <span id="fpsVal">30</span>
   <span id="status">—</span>
 </div>
 
@@ -218,7 +218,7 @@
   // ---------- estado ----------
   let imagens = [];       // [{nome, file}] carregadas pelo usuário
   let frames = [];        // frames ASCII em exibição
-  let atual = 0, tocando = true, fps = 8, timer = null;
+  let atual = 0, tocando = true, fps = 30, timer = null; // sempre começa em 30 fps
 
   // id de sessão: isola o cache de imagens deste navegador no servidor
   const sessao = (crypto.randomUUID && crypto.randomUUID()) ||
@@ -324,7 +324,7 @@
       await new Promise((res, rej) => {
         const tx = bd.transaction('animacoes', 'readwrite');
         tx.objectStore('animacoes').put(
-          { frames, fps, cor: $('cfgCor').value, cfg: lerCfg() }, 'ultima');
+          { frames, cor: $('cfgCor').value, cfg: lerCfg() }, 'ultima');
         tx.oncomplete = res;
         tx.onerror = () => rej(tx.error);
       });
@@ -434,8 +434,19 @@
   const ordemNatural = (a, b) =>
     a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
 
+  // só imagem raster — SVG e afins são bloqueados (o servidor também recusa)
+  const TIPOS_OK = ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/bmp'];
+  const EXT_OK = /\.(png|jpe?g|gif|webp|bmp)$/i;
+  const tipoPermitido = f => TIPOS_OK.includes(f.type) || (!f.type && EXT_OK.test(f.name));
+
   async function carregar(files) {
-    const lista = [...files].filter(f => f.type.startsWith('image/')).sort(ordemNatural);
+    const todos = [...files];
+    const lista = todos.filter(tipoPermitido).sort(ordemNatural);
+    const barrados = todos.filter(f => !tipoPermitido(f));
+    if (barrados.length) {
+      elStatus.textContent = `ignorado: ${barrados[0].name}${barrados.length > 1 ? ` +${barrados.length - 1}` : ''} — só PNG, JPG, GIF, WebP, BMP`;
+      if (!lista.length) return;
+    }
     if (!lista.length) return;
     await pingPronto; // garante que os limites do servidor já chegaram
     if (limites && lista.length > limites.maxArquivos) {
@@ -550,7 +561,7 @@ ajustar();el.textContent=FRAMES[0];agendar();
   $('btnPlay').onclick = alternar;
   $('btnAnt').onclick = () => { if (tocando) alternar(); passo(-1); };
   $('btnProx').onclick = () => { if (tocando) alternar(); passo(1); };
-  $('fps').oninput = e => { fps = +e.target.value; $('fpsVal').textContent = fps; agendar(); salvarDepois(); };
+  $('fps').oninput = e => { fps = +e.target.value; $('fpsVal').textContent = fps; agendar(); };
 
   addEventListener('keydown', e => {
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
@@ -591,11 +602,6 @@ ajustar();el.textContent=FRAMES[0];agendar();
     const salvo = await carregarLocal();
     if (salvo && Array.isArray(salvo.frames) && salvo.frames.length && !frames.length) {
       frames = salvo.frames;
-      if (salvo.fps >= 1) {
-        fps = Math.min(30, Math.round(salvo.fps));
-        $('fps').value = fps;
-        $('fpsVal').textContent = fps;
-      }
       if (salvo.cor) {
         $('cfgCor').value = salvo.cor;
         document.documentElement.style.setProperty('--verde', salvo.cor);

@@ -73,7 +73,23 @@ setInterval(() => {
   for (const [s, c] of caches) if (agora - c.usado > SESSAO_TTL) limparSessao(s);
 }, 5 * 60 * 1000).unref();
 
-function salvarImagens(sessao, imagens) {
+// ---------- validação dos arquivos ----------
+// Só imagem raster entra, identificada pela assinatura binária (magic bytes) —
+// nome e MIME informados pelo cliente são ignorados. SVG (XML que pode carregar
+// script), HTML e qualquer outro tipo são recusados.
+const ASSINATURAS = [
+  { ext: '.png',  ok: b => b.length > 8 && b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4E && b[3] === 0x47 },
+  { ext: '.jpg',  ok: b => b.length > 3 && b[0] === 0xFF && b[1] === 0xD8 && b[2] === 0xFF },
+  { ext: '.gif',  ok: b => b.length > 6 && b.toString('ascii', 0, 4) === 'GIF8' },
+  { ext: '.webp', ok: b => b.length > 12 && b.toString('ascii', 0, 4) === 'RIFF' && b.toString('ascii', 8, 12) === 'WEBP' },
+  { ext: '.bmp',  ok: b => b.length > 2 && b[0] === 0x42 && b[1] === 0x4D },
+];
+function tipoImagem(buf) {
+  for (const a of ASSINATURAS) if (a.ok(buf)) return a.ext;
+  return null;
+}
+
+function salvarImagens(sessao, validadas) {
   limparSessao(sessao);
   // muita gente ao mesmo tempo? derruba a sessão parada há mais tempo
   while (caches.size >= MAX_SESSOES) {
@@ -82,10 +98,9 @@ function salvarImagens(sessao, imagens) {
     limparSessao(velha);
   }
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ascii-studio-'));
-  const arquivos = imagens.map((im, i) => {
-    const ext = (path.extname(im.nome || '') || '.png').toLowerCase();
-    const f = path.join(dir, `img${String(i + 1).padStart(4, '0')}${ext}`);
-    fs.writeFileSync(f, Buffer.from(im.b64, 'base64'));
+  const arquivos = validadas.map((v, i) => {
+    const f = path.join(dir, `img${String(i + 1).padStart(4, '0')}${v.ext}`);
+    fs.writeFileSync(f, v.buf);
     return f;
   });
   caches.set(sessao, { dir, arquivos, usado: Date.now() });
@@ -172,15 +187,24 @@ const servidor = http.createServer(async (req, res) => {
           res.end(JSON.stringify({ erro: `máximo de ${MAX_ARQUIVOS} arquivos por conversão (recebidos: ${body.imagens.length})` }));
           return;
         }
+        const validadas = [];
         for (const im of body.imagens) {
-          const tam = Math.floor(String(im.b64 || '').length * 3 / 4); // tamanho decodificado aprox.
-          if (tam > MAX_TAMANHO_ARQUIVO) {
+          const nome = String(im.nome || 'arquivo').slice(0, 200);
+          const buf = Buffer.from(String(im.b64 || ''), 'base64');
+          if (buf.length > MAX_TAMANHO_ARQUIVO) {
             res.writeHead(413, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ erro: `"${im.nome || 'arquivo'}" excede o limite de ${MAX_TAMANHO_KB} KB por arquivo` }));
+            res.end(JSON.stringify({ erro: `"${nome}" excede o limite de ${MAX_TAMANHO_KB} KB por arquivo` }));
             return;
           }
+          const ext = tipoImagem(buf);
+          if (!ext) {
+            res.writeHead(415, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ erro: `"${nome}" não é um formato de imagem permitido (PNG, JPG, GIF, WebP, BMP)` }));
+            return;
+          }
+          validadas.push({ buf, ext });
         }
-        salvarImagens(sessao, body.imagens);
+        salvarImagens(sessao, validadas);
       }
       const cache = caches.get(sessao);
       if (!cache) {
