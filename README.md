@@ -6,7 +6,7 @@ Projeto para transformar frames de imagem de qualquer formato em animação ASCI
 ## Como usar
 
 1. Transforme o vídeo que você quer em PNG, JPG ou qualquer outro formato de imagem — use algum programa para extrair os frames (por exemplo, o kdenlive).
-2. Rode o servidor (só precisa do Node, sem dependências):
+2. Rode o servidor (precisa do Node e do binário `ascii-image-converter` — veja abaixo):
 
    ```bash
    npm start
@@ -17,13 +17,30 @@ Projeto para transformar frames de imagem de qualquer formato em animação ASCI
 4. Na interface, arraste os frames pra tela (ou use ⚙ config → escolher imagens) e ajuste largura, mapa de caracteres, cor etc.
 5. Ao final, exporte o resultado como um HTML puro, num arquivo único com a animação embutida.
 
-### Conversão no servidor (opcional)
+### Conversão no servidor
 
-Se o binário [ascii-image-converter](https://github.com/TheZoraiz/ascii-image-converter/releases) estiver instalado (no PATH, em `~/.local/bin/` ou na pasta do projeto), a conversão pesada é feita pelo servidor. Sem ele, a conversão acontece no próprio navegador — tudo continua funcionando.
+Toda a conversão é feita no servidor pelo binário [ascii-image-converter](https://github.com/TheZoraiz/ascii-image-converter/releases) — nada roda no navegador do cliente. O servidor procura o binário no PATH, em `~/.local/bin/` ou na pasta do projeto, e não sobe sem ele (no deploy com o Dockerfile ele já vem instalado).
 
-Também dá pra usar sem servidor nenhum: basta abrir o `index.html` direto no navegador.
+### Variáveis de ambiente
 
-Variáveis de ambiente do servidor: `PORT` (porta, padrão 8000) e `HOST` (padrão `127.0.0.1`; use `0.0.0.0` pra expor na rede).
+| Variável | Padrão | Descrição |
+|---|---|---|
+| `PORT` | `8000` | porta do servidor |
+| `HOST` | `127.0.0.1` | use `0.0.0.0` pra expor na rede/container |
+| `MAX_ARQUIVOS` | `200` | nº máximo de arquivos por conversão |
+| `MAX_TAMANHO_MB` | `5` | tamanho máximo por arquivo, em MB |
+
+Os limites evitam sobrecarga do servidor: pedidos acima deles são recusados com HTTP 413, e a interface valida antes de enviar.
+
+### Deploy no Coolify (ou qualquer Docker)
+
+O repositório traz um `Dockerfile` pronto que compila o `ascii-image-converter` na build e sobe o servidor:
+
+1. No Coolify, crie um recurso apontando pra este repositório e escolha **Dockerfile** como build pack.
+2. A porta exposta é a **8000** (o `HOST=0.0.0.0` já vem definido na imagem).
+3. Ajuste `MAX_ARQUIVOS` e `MAX_TAMANHO_MB` nas variáveis de ambiente, se quiser.
+
+O healthcheck da imagem usa `GET /api/ping`.
 
 ### Conversão em lote pela linha de comando
 
