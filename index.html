@@ -2,6 +2,8 @@
 <html lang="pt-BR">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%23000'/%3E%3Ctext x='2' y='12' font-family='monospace' font-size='11' fill='%2300ff41'%3E%40%3C/text%3E%3C/svg%3E">
 <title>ASCII Studio</title>
 <style>
   :root { --verde: #00ff41; }
@@ -195,7 +197,9 @@
   let servidor = false;
   let enviadas = false; // imagens já estão no cache do servidor?
   if (location.protocol.startsWith('http')) {
-    fetch('/api/ping').then(r => r.json()).then(() => { servidor = true; }).catch(() => {});
+    fetch('api/ping').then(r => r.json())
+      .then(j => { servidor = !!(j.ok && j.conversor); })
+      .catch(() => {});
   }
 
   // ---------- animação ----------
@@ -237,12 +241,31 @@
   addEventListener('resize', ajustar);
 
   // ---------- conversão imagem → ASCII (no navegador) ----------
+  function criarCanvas(w, h) {
+    if (typeof OffscreenCanvas !== 'undefined') return new OffscreenCanvas(w, h);
+    const c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    return c;
+  }
+
+  function lerBitmap(file) {
+    if (typeof createImageBitmap === 'function') return createImageBitmap(file);
+    return new Promise((res, rej) => {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => { URL.revokeObjectURL(url); res(img); };
+      img.onerror = () => { URL.revokeObjectURL(url); rej(new Error('falha ao ler ' + file.name)); };
+      img.src = url;
+    });
+  }
+
   function converterUma(bitmap, cfg) {
     const cols = cfg.largura;
+    const bw = bitmap.width || bitmap.naturalWidth, bh = bitmap.height || bitmap.naturalHeight;
     // 0.5 ≈ proporção largura/altura de um caractere monoespaçado
     const rows = cfg.altura > 0 ? cfg.altura
-      : Math.max(1, Math.round(cols * (bitmap.height / bitmap.width) * 0.5));
-    const cv = new OffscreenCanvas(cols, rows);
+      : Math.max(1, Math.round(cols * (bh / bw) * 0.5));
+    const cv = criarCanvas(cols, rows);
     const cx = cv.getContext('2d', { willReadFrequently: true });
     cx.imageSmoothingEnabled = true;
     cx.imageSmoothingQuality = 'high';
@@ -307,7 +330,7 @@
             imagens.map(async im => ({ nome: im.nome, b64: await paraB64(im.file) }))
           );
         }
-        const r = await fetch('/api/converter', {
+        const r = await fetch('api/converter', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
@@ -341,7 +364,7 @@
     if (!lista.length) return;
     elStatus.textContent = 'convertendo…';
     imagens = await Promise.all(
-      lista.map(async f => ({ nome: f.name, file: f, bitmap: await createImageBitmap(f) }))
+      lista.map(async f => ({ nome: f.name, file: f, bitmap: await lerBitmap(f) }))
     );
     enviadas = false;
     reconverter();

@@ -14,7 +14,7 @@ const path = require('path');
 const { spawnSync } = require('child_process');
 
 const DIR = __dirname;
-const PORTA = +process.argv[2] || 8000;
+const PORTA = +process.argv[2] || +process.env.PORT || 8000;
 const LIMITE_BODY = 300 * 1024 * 1024; // 300 MB
 
 // ---------- localizar o binário ----------
@@ -32,9 +32,8 @@ function acharBinario() {
 }
 const BINARIO = acharBinario();
 if (!BINARIO) {
-  console.error('ERRO: ascii-image-converter não encontrado.');
-  console.error('Baixe em https://github.com/TheZoraiz/ascii-image-converter/releases');
-  process.exit(1);
+  console.warn('AVISO: ascii-image-converter não encontrado — a conversão será feita no navegador.');
+  console.warn('Para converter no servidor, baixe em https://github.com/TheZoraiz/ascii-image-converter/releases');
 }
 
 // ---------- cache das imagens enviadas ----------
@@ -127,11 +126,16 @@ const servidor = http.createServer(async (req, res) => {
   try {
     if (req.method === 'GET' && url.pathname === '/api/ping') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ ok: true, binario: BINARIO }));
+      res.end(JSON.stringify({ ok: true, conversor: !!BINARIO, binario: BINARIO }));
       return;
     }
 
     if (req.method === 'POST' && url.pathname === '/api/converter') {
+      if (!BINARIO) {
+        res.writeHead(501, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ erro: 'ascii-image-converter não instalado no servidor' }));
+        return;
+      }
       const body = JSON.parse((await lerBody(req)).toString('utf8'));
       const cfg = {
         largura: Math.min(800, Math.max(20, +body.cfg?.largura || 400)),
@@ -176,7 +180,8 @@ const servidor = http.createServer(async (req, res) => {
   }
 });
 
-servidor.listen(PORTA, '127.0.0.1', () => {
-  console.log(`ASCII Studio no ar: http://localhost:${PORTA}`);
-  console.log(`binário: ${BINARIO}`);
+const HOST = process.env.HOST || '127.0.0.1';
+servidor.listen(PORTA, HOST, () => {
+  console.log(`ASCII Studio no ar: http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORTA}`);
+  console.log(`conversão no servidor: ${BINARIO ? BINARIO : 'indisponível (fallback no navegador)'}`);
 });
