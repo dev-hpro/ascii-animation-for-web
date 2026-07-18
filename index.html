@@ -2,6 +2,8 @@
 <html lang="pt-BR">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%23000'/%3E%3Ctext x='2' y='12' font-family='monospace' font-size='11' fill='%2300ff41'%3E%40%3C/text%3E%3C/svg%3E">
 <title>ASCII Studio</title>
 <style>
   :root { --verde: #00ff41; }
@@ -191,12 +193,15 @@
   let frames = window.FRAMES || [];    // frames ASCII em exibição (frames.js como ponto de partida)
   let atual = 0, tocando = true, fps = 8, timer = null;
 
-  // Servidor disponível? (servidor.js converte com o binário, poupando o navegador)
+  // A conversão é sempre feita no servidor (servidor.js + binário ascii-image-converter).
   let servidor = false;
+  let limites = null;  // { maxArquivos, maxTamanhoKb } informados pelo servidor
   let enviadas = false; // imagens já estão no cache do servidor?
-  if (location.protocol.startsWith('http')) {
-    fetch('/api/ping').then(r => r.json()).then(() => { servidor = true; }).catch(() => {});
-  }
+  const pingPronto = location.protocol.startsWith('http')
+    ? fetch('api/ping').then(r => r.json())
+        .then(j => { servidor = !!(j.ok && j.conversor); limites = j.limites || null; })
+        .catch(() => {})
+    : Promise.resolve();
 
   // ---------- animação ----------
   function mostrar() {
@@ -236,37 +241,6 @@
   }
   addEventListener('resize', ajustar);
 
-  // ---------- conversão imagem → ASCII (no navegador) ----------
-  function converterUma(bitmap, cfg) {
-    const cols = cfg.largura;
-    // 0.5 ≈ proporção largura/altura de um caractere monoespaçado
-    const rows = cfg.altura > 0 ? cfg.altura
-      : Math.max(1, Math.round(cols * (bitmap.height / bitmap.width) * 0.5));
-    const cv = new OffscreenCanvas(cols, rows);
-    const cx = cv.getContext('2d', { willReadFrequently: true });
-    cx.imageSmoothingEnabled = true;
-    cx.imageSmoothingQuality = 'high';
-    cx.drawImage(bitmap, 0, 0, cols, rows);
-    const px = cx.getImageData(0, 0, cols, rows).data;
-    const mapa = cfg.mapa, n = mapa.length - 1;
-    let out = '';
-    for (let y = 0; y < rows; y++) {
-      for (let x = 0; x < cols; x++) {
-        const i = (y * cols + x) * 4;
-        const a = px[i + 3] / 255;
-        // pixel transparente vira fundo branco
-        const r = px[i] * a + 255 * (1 - a);
-        const g = px[i + 1] * a + 255 * (1 - a);
-        const b = px[i + 2] * a + 255 * (1 - a);
-        let t = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255; // 0=escuro 1=claro
-        if (cfg.negativo) t = 1 - t;
-        out += mapa[Math.round(t * n)];
-      }
-      out += '\n';
-    }
-    return out;
-  }
-
   function lerCfg() {
     let mapa = $('cfgMapa').value;
     if (mapa.length < 2) mapa = '@ ';
@@ -287,6 +261,20 @@
     });
   }
 
+  function empacotar() {
+    return Promise.all(
+      imagens.map(async im => ({ nome: im.nome, b64: await paraB64(im.file) }))
+    );
+  }
+
+  function enviarConversao(payload) {
+    return fetch('api/converter', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  }
+
   let convertendo = false;
   async function reconverter() {
     if (!imagens.length) {
@@ -297,30 +285,24 @@
     convertendo = true;
     const cfg = lerCfg();
     try {
-      if (servidor) {
-        // conversão pesada no servidor.js (binário ascii-image-converter);
-        // as imagens só são enviadas na primeira vez, ajustes reusam o cache
-        elStatus.textContent = 'convertendo (servidor)…';
-        const payload = { cfg };
-        if (!enviadas) {
-          payload.imagens = await Promise.all(
-            imagens.map(async im => ({ nome: im.nome, b64: await paraB64(im.file) }))
-          );
-        }
-        const r = await fetch('/api/converter', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        });
-        const j = await r.json();
-        if (!r.ok) throw new Error(j.erro || r.status);
-        enviadas = true;
-        frames = j.frames;
-      } else {
-        // fallback: conversão no próprio navegador (canvas)
-        elStatus.textContent = 'convertendo…';
-        frames = imagens.map(im => converterUma(im.bitmap, cfg));
+      if (!servidor) {
+        throw new Error('servidor de conversão indisponível — abra a página pelo servidor.js');
       }
+      // conversão pesada no servidor.js (binário ascii-image-converter);
+      // as imagens só são enviadas na primeira vez, ajustes reusam o cache
+      elStatus.textContent = 'convertendo (servidor)…';
+      const payload = { cfg };
+      if (!enviadas) payload.imagens = await empacotar();
+      let r = await enviarConversao(payload);
+      if (r.status === 400 && !payload.imagens) {
+        // servidor reiniciou e perdeu o cache — re-envia as imagens uma vez
+        enviadas = false;
+        r = await enviarConversao({ cfg, imagens: await empacotar() });
+      }
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.erro || r.status);
+      enviadas = true;
+      frames = j.frames;
       atual = 0;
       ajustar();
       mostrar();
@@ -332,6 +314,50 @@
     }
   }
 
+  // ---------- compressão no navegador ----------
+  // Arquivo acima do limite do servidor? O navegador redimensiona e reencoda
+  // em JPEG até caber — a conversão ASCII usa no máximo 800 colunas, então dá
+  // pra reduzir bastante sem perder detalhe visível no resultado.
+  function criarCanvas(w, h) {
+    if (typeof OffscreenCanvas !== 'undefined') return new OffscreenCanvas(w, h);
+    const c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    return c;
+  }
+  function lerBitmap(file) {
+    if (typeof createImageBitmap === 'function') return createImageBitmap(file);
+    return new Promise((res, rej) => {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => { URL.revokeObjectURL(url); res(img); };
+      img.onerror = () => { URL.revokeObjectURL(url); rej(new Error('falha ao ler ' + file.name)); };
+      img.src = url;
+    });
+  }
+  function paraBlob(cv, qualidade) {
+    if (cv.convertToBlob) return cv.convertToBlob({ type: 'image/jpeg', quality: qualidade });
+    return new Promise(res => cv.toBlob(res, 'image/jpeg', qualidade));
+  }
+  async function comprimir(file, maxB) {
+    const bm = await lerBitmap(file);
+    const bw = bm.width || bm.naturalWidth, bh = bm.height || bm.naturalHeight;
+    const larguraBase = Math.min(bw, 1600);
+    for (const escala of [1, 0.7, 0.5, 0.35, 0.25, 0.15]) {
+      const w = Math.max(1, Math.round(larguraBase * escala));
+      const h = Math.max(1, Math.round(w * bh / bw));
+      const cv = criarCanvas(w, h);
+      const cx = cv.getContext('2d');
+      cx.fillStyle = '#fff'; // JPEG não tem transparência: fundo branco
+      cx.fillRect(0, 0, w, h);
+      cx.drawImage(bm, 0, 0, w, h);
+      for (const q of [0.8, 0.6, 0.4]) {
+        const blob = await paraBlob(cv, q);
+        if (blob.size <= maxB) return blob;
+      }
+    }
+    throw new Error(`não deu pra comprimir "${file.name}" abaixo do limite`);
+  }
+
   // ---------- carregamento de imagens ----------
   const ordemNatural = (a, b) =>
     a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
@@ -339,10 +365,28 @@
   async function carregar(files) {
     const lista = [...files].filter(f => f.type.startsWith('image/')).sort(ordemNatural);
     if (!lista.length) return;
-    elStatus.textContent = 'convertendo…';
-    imagens = await Promise.all(
-      lista.map(async f => ({ nome: f.name, file: f, bitmap: await createImageBitmap(f) }))
-    );
+    await pingPronto; // garante que os limites do servidor já chegaram
+    if (limites && lista.length > limites.maxArquivos) {
+      elStatus.textContent = `erro: máximo de ${limites.maxArquivos} arquivos por conversão`;
+      return;
+    }
+    const maxB = limites ? limites.maxTamanhoKb * 1024 : Infinity;
+    try {
+      const novas = [];
+      for (let i = 0; i < lista.length; i++) {
+        const f = lista[i];
+        if (f.size > maxB) {
+          elStatus.textContent = `comprimindo ${i + 1}/${lista.length} (${f.name})…`;
+          novas.push({ nome: f.name.replace(/\.[^.]+$/, '') + '.jpg', file: await comprimir(f, maxB) });
+        } else {
+          novas.push({ nome: f.name, file: f });
+        }
+      }
+      imagens = novas;
+    } catch (e) {
+      elStatus.textContent = 'erro: ' + e.message;
+      return;
+    }
     enviadas = false;
     reconverter();
     $('painel').classList.remove('fechado');

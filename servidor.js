@@ -14,8 +14,17 @@ const path = require('path');
 const { spawnSync } = require('child_process');
 
 const DIR = __dirname;
-const PORTA = +process.argv[2] || 8000;
-const LIMITE_BODY = 300 * 1024 * 1024; // 300 MB
+const PORTA = +process.argv[2] || +process.env.PORT || 8000;
+
+// ---------- limites (contra sobrecarga) ----------
+// MAX_ARQUIVOS    — nº máximo de arquivos por conversão (padrão 200)
+// MAX_TAMANHO_KB  — tamanho máximo por arquivo, em KB (padrão 500);
+//                   acima disso o navegador comprime antes de enviar
+const MAX_ARQUIVOS = Math.max(1, Math.floor(+process.env.MAX_ARQUIVOS) || 200);
+const MAX_TAMANHO_KB = +process.env.MAX_TAMANHO_KB > 0 ? +process.env.MAX_TAMANHO_KB : 500;
+const MAX_TAMANHO_ARQUIVO = Math.round(MAX_TAMANHO_KB * 1024);
+// corpo JSON: arquivos em base64 (~4/3 do tamanho) + folga pra estrutura
+const LIMITE_BODY = Math.ceil(MAX_ARQUIVOS * MAX_TAMANHO_ARQUIVO * 4 / 3) + 1024 * 1024;
 
 // ---------- localizar o binário ----------
 function acharBinario() {
@@ -32,8 +41,9 @@ function acharBinario() {
 }
 const BINARIO = acharBinario();
 if (!BINARIO) {
-  console.error('ERRO: ascii-image-converter não encontrado.');
+  console.error('ERRO: ascii-image-converter não encontrado — a conversão é feita no servidor e precisa dele.');
   console.error('Baixe em https://github.com/TheZoraiz/ascii-image-converter/releases');
+  console.error('(no deploy com o Dockerfile deste repositório ele já vem instalado)');
   process.exit(1);
 }
 
@@ -127,7 +137,12 @@ const servidor = http.createServer(async (req, res) => {
   try {
     if (req.method === 'GET' && url.pathname === '/api/ping') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ ok: true, binario: BINARIO }));
+      res.end(JSON.stringify({
+        ok: true,
+        conversor: true,
+        binario: BINARIO,
+        limites: { maxArquivos: MAX_ARQUIVOS, maxTamanhoKb: MAX_TAMANHO_KB },
+      }));
       return;
     }
 
@@ -139,7 +154,22 @@ const servidor = http.createServer(async (req, res) => {
         mapa: String(body.cfg?.mapa || '@%#*+=:-. '),
         negativo: !!body.cfg?.negativo,
       };
-      if (Array.isArray(body.imagens) && body.imagens.length) salvarImagens(body.imagens);
+      if (Array.isArray(body.imagens) && body.imagens.length) {
+        if (body.imagens.length > MAX_ARQUIVOS) {
+          res.writeHead(413, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ erro: `máximo de ${MAX_ARQUIVOS} arquivos por conversão (recebidos: ${body.imagens.length})` }));
+          return;
+        }
+        for (const im of body.imagens) {
+          const tam = Math.floor(String(im.b64 || '').length * 3 / 4); // tamanho decodificado aprox.
+          if (tam > MAX_TAMANHO_ARQUIVO) {
+            res.writeHead(413, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ erro: `"${im.nome || 'arquivo'}" excede o limite de ${MAX_TAMANHO_KB} KB por arquivo` }));
+            return;
+          }
+        }
+        salvarImagens(body.imagens);
+      }
       if (!cache) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ erro: 'nenhuma imagem enviada ainda' }));
@@ -176,7 +206,9 @@ const servidor = http.createServer(async (req, res) => {
   }
 });
 
-servidor.listen(PORTA, '127.0.0.1', () => {
-  console.log(`ASCII Studio no ar: http://localhost:${PORTA}`);
+const HOST = process.env.HOST || '127.0.0.1';
+servidor.listen(PORTA, HOST, () => {
+  console.log(`ASCII Studio no ar: http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORTA}`);
   console.log(`binário: ${BINARIO}`);
+  console.log(`limites: ${MAX_ARQUIVOS} arquivos, ${MAX_TAMANHO_KB} KB por arquivo (MAX_ARQUIVOS / MAX_TAMANHO_KB)`);
 });
