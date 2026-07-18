@@ -4,7 +4,8 @@
   "description": "Transforma frames de imagem em animação ASCII que roda direto no navegador",
   "main": "servidor.js",
   "scripts": {
-    "start": "node servidor.js"
+    "start": "node servidor.js",
+    "build": "bash instala-conversor.sh"
   },
   "engines": {
     "node": ">=14"

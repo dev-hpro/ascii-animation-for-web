@@ -206,7 +206,9 @@ const servidor = http.createServer(async (req, res) => {
   }
 });
 
-const HOST = process.env.HOST || '127.0.0.1';
+// 0.0.0.0 por padrão pra funcionar atrás do proxy em container (Coolify etc.);
+// use HOST=127.0.0.1 pra restringir ao acesso local
+const HOST = process.env.HOST || '0.0.0.0';
 servidor.listen(PORTA, HOST, () => {
   console.log(`ASCII Studio no ar: http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORTA}`);
   console.log(`binário: ${BINARIO}`);
