@@ -284,28 +284,43 @@
     if (!audioOk) return;
     sintonizarAudio();
     if ($('cfgAudio').checked && tocando && frames.length > 1) {
-      // autoplay pode ser bloqueado antes do primeiro gesto do usuário:
-      // nesse caso o áudio começa (alinhado ao primeiro frame) no primeiro clique/tecla
-      audio.play().catch(tocarNoPrimeiroGesto);
+      audio.play().then(() => {
+        // tocando, mas ainda mudo de uma tentativa anterior? segue esperando gesto
+        if (audio.muted) destravarSomNoGesto();
+      }).catch(() => {
+        // navegador bloqueou o som antes do primeiro gesto (política de autoplay):
+        // toca MUDO (sempre permitido) pra áudio e animação partirem juntos, em
+        // sincronia desde o primeiro frame; o som entra no primeiro gesto do
+        // usuário, já na posição certa, sem reiniciar nada
+        audio.muted = true;
+        audio.play().catch(() => {});
+        destravarSomNoGesto();
+      });
     } else {
       audio.pause();
     }
   }
   let esperandoGesto = false;
-  function tocarNoPrimeiroGesto() {
+  function destravarSomNoGesto() {
     if (esperandoGesto) return;
     esperandoGesto = true;
-    const inicia = () => {
-      removeEventListener('pointerdown', inicia);
-      removeEventListener('keydown', inicia);
+    const eventos = ['pointerdown', 'keydown', 'touchend'];
+    const desarmar = () => {
       esperandoGesto = false;
-      if (!audioOk || !$('cfgAudio').checked || !tocando || frames.length < 2) return;
-      atual = 0;
-      mostrar();
-      reiniciarAudio();
+      eventos.forEach(ev => removeEventListener(ev, tentar));
     };
-    addEventListener('pointerdown', inicia);
-    addEventListener('keydown', inicia);
+    const tentar = () => {
+      const deviaTocar = audioOk && $('cfgAudio').checked && tocando && frames.length > 1;
+      const parado = audio.paused; // nem mudo tinha conseguido começar
+      audio.muted = false;
+      if (!deviaTocar) { desarmar(); return; }
+      audio.play().then(() => {
+        // caso raro: áudio nunca chegou a rodar — realinha ao primeiro frame
+        if (parado) { atual = 0; mostrar(); audio.currentTime = 0; }
+        desarmar();
+      }).catch(() => { audio.muted = true; audio.play().catch(() => {}); });
+    };
+    eventos.forEach(ev => addEventListener(ev, tentar));
   }
   function reiniciarAudio() {
     audio.currentTime = 0;
