@@ -30,6 +30,35 @@
     text-shadow: 0 0 6px color-mix(in srgb, var(--verde) 45%, transparent);
   }
 
+  /* modal de play — o clique é o gesto que libera o áudio no navegador */
+  #modalPlay {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 20px;
+    background: rgba(0, 0, 0, .55);
+    z-index: 4; /* abaixo da barra e do painel, que continuam clicáveis */
+  }
+  #modalPlay[hidden] { display: none; }
+  #btnModalPlay {
+    width: 100px;
+    height: 100px;
+    border-radius: 50%;
+    border: 2px solid var(--verde);
+    font-size: 44px;
+    line-height: 1;
+    padding: 0;
+    background: rgba(0, 20, 5, .9);
+    box-shadow: 0 0 24px color-mix(in srgb, var(--verde) 35%, transparent);
+  }
+  #modalMsg {
+    font-size: 16px;
+    text-shadow: 0 0 6px color-mix(in srgb, var(--verde) 45%, transparent);
+  }
+
   /* barra inferior */
   #controles {
     position: fixed;
@@ -159,6 +188,11 @@
 <audio id="audio" src="audio-exemplo.mp3" preload="auto"></audio>
 <div id="soltar">solte as imagens aqui</div>
 
+<div id="modalPlay" hidden>
+  <button id="btnModalPlay">▶</button>
+  <div id="modalMsg">toque no play para iniciar</div>
+</div>
+
 <a id="credito" href="https://henrique.pro" target="_blank" rel="noopener">henrique.pro</a>
 
 <button id="btnPainel">⚙ config</button>
@@ -218,10 +252,10 @@
 </div>
 
 <div id="controles">
-  <button id="btnPlay">⏸ pausa</button>
+  <button id="btnPlay">▶ play</button>
   <button id="btnAnt">⏮</button>
   <button id="btnProx">⏭</button>
-  <label>fps <input type="range" id="fps" min="1" max="30" step="1" value="30"></label>
+  <label id="rotFps">fps <input type="range" id="fps" min="1" max="30" step="1" value="30"></label>
   <span id="fpsVal">30</span>
   <span id="status">—</span>
 </div>
@@ -234,7 +268,10 @@
   // ---------- estado ----------
   let imagens = [];       // [{nome, file}] carregadas pelo usuário
   let frames = [];        // frames ASCII em exibição
-  let atual = 0, tocando = true, fps = 30, timer = null; // sempre começa em 30 fps
+  // começa pausado (30 fps): o modal de play é quem inicia — o clique nele é o
+  // gesto que os navegadores exigem pra liberar o áudio
+  let atual = 0, tocando = false, fps = 30, timer = null;
+  let producao = false; // deployado: só o exemplo com play/pause, sem painel
 
   // id de sessão: isola o cache de imagens deste navegador no servidor
   const sessao = (crypto.randomUUID && crypto.randomUUID()) ||
@@ -252,8 +289,16 @@
           limites = j.limites || null;
           upload = !!j.upload;
           if (servidor && !upload) {
-            $('btnImagens').disabled = true;
-            $('btnImagens').textContent = '📂 envio em fase de testes';
+            // produção: o site é só o exemplo definido no dev, com play/pause —
+            // sem painel de configuração nem controles extras
+            producao = true;
+            $('btnPainel').hidden = true;
+            $('painel').classList.add('fechado');
+            $('btnAnt').hidden = true;
+            $('btnProx').hidden = true;
+            $('rotFps').hidden = true;
+            $('fpsVal').hidden = true;
+            $('status').hidden = true;
           }
           if (servidor && upload) { // modo dev
             $('btnExemplo').hidden = false;
@@ -284,43 +329,12 @@
     if (!audioOk) return;
     sintonizarAudio();
     if ($('cfgAudio').checked && tocando && frames.length > 1) {
-      audio.play().then(() => {
-        // tocando, mas ainda mudo de uma tentativa anterior? segue esperando gesto
-        if (audio.muted) destravarSomNoGesto();
-      }).catch(() => {
-        // navegador bloqueou o som antes do primeiro gesto (política de autoplay):
-        // toca MUDO (sempre permitido) pra áudio e animação partirem juntos, em
-        // sincronia desde o primeiro frame; o som entra no primeiro gesto do
-        // usuário, já na posição certa, sem reiniciar nada
-        audio.muted = true;
-        audio.play().catch(() => {});
-        destravarSomNoGesto();
-      });
+      // o play sempre parte de um gesto do usuário (modal/barra/teclado),
+      // então o navegador não bloqueia o som
+      audio.play().catch(() => {});
     } else {
       audio.pause();
     }
-  }
-  let esperandoGesto = false;
-  function destravarSomNoGesto() {
-    if (esperandoGesto) return;
-    esperandoGesto = true;
-    const eventos = ['pointerdown', 'keydown', 'touchend'];
-    const desarmar = () => {
-      esperandoGesto = false;
-      eventos.forEach(ev => removeEventListener(ev, tentar));
-    };
-    const tentar = () => {
-      const deviaTocar = audioOk && $('cfgAudio').checked && tocando && frames.length > 1;
-      const parado = audio.paused; // nem mudo tinha conseguido começar
-      audio.muted = false;
-      if (!deviaTocar) { desarmar(); return; }
-      audio.play().then(() => {
-        // caso raro: áudio nunca chegou a rodar — realinha ao primeiro frame
-        if (parado) { atual = 0; mostrar(); audio.currentTime = 0; }
-        desarmar();
-      }).catch(() => { audio.muted = true; audio.play().catch(() => {}); });
-    };
-    eventos.forEach(ev => addEventListener(ev, tentar));
   }
   function reiniciarAudio() {
     audio.currentTime = 0;
@@ -347,8 +361,30 @@
   function alternar() {
     tocando = !tocando;
     $('btnPlay').textContent = tocando ? '⏸ pausa' : '▶ play';
+    // rodando: modal some; pausado: modal volta oferecendo o play
+    if (tocando) $('modalPlay').hidden = true;
+    else if (frames.length) mostrarModal();
     agendar();
   }
+
+  // ---------- modal de play ----------
+  let jaIniciou = false; // primeira vez alinha áudio e animação no frame 1
+  function mostrarModal() {
+    $('modalMsg').textContent = jaIniciou
+      ? 'toque no play para continuar'
+      : 'toque no play para iniciar';
+    $('modalPlay').hidden = false;
+  }
+  $('btnModalPlay').onclick = () => {
+    if (!frames.length) return;
+    if (!jaIniciou) {
+      jaIniciou = true;
+      atual = 0;
+      mostrar();
+      audio.currentTime = 0;
+    }
+    if (!tocando) alternar();
+  };
 
   // ---------- ajuste de fonte pra caber na tela ----------
   function ajustar() {
@@ -583,7 +619,7 @@
   $('btnImagens').onclick = () => $('arquivos').click();
   $('arquivos').onchange = e => carregar(e.target.files);
 
-  addEventListener('dragover', e => { e.preventDefault(); document.body.classList.add('arrastando'); });
+  addEventListener('dragover', e => { e.preventDefault(); if (!producao) document.body.classList.add('arrastando'); });
   addEventListener('dragleave', e => { if (!e.relatedTarget) document.body.classList.remove('arrastando'); });
   addEventListener('drop', e => {
     e.preventDefault();
@@ -703,7 +739,7 @@ ajustar();el.textContent=FRAMES[0];agendar();
     else if (e.key === 'ArrowUp') { $('fps').value = Math.min(30, fps + 1); $('fps').oninput({ target: $('fps') }); }
     else if (e.key === 'ArrowDown') { $('fps').value = Math.max(1, fps - 1); $('fps').oninput({ target: $('fps') }); }
     else if (e.key.toLowerCase() === 'f') document.documentElement.requestFullscreen?.();
-    else if (e.key.toLowerCase() === 'c') $('btnPainel').onclick();
+    else if (e.key.toLowerCase() === 'c' && !producao) $('btnPainel').onclick();
   });
 
   // barra some com mouse/toque parado (e volta com movimento ou toque)
@@ -757,6 +793,7 @@ ajustar();el.textContent=FRAMES[0];agendar();
     mostrar();
     reiniciarAudio();
     agendar();
+    if (!tocando) mostrarModal();
   }
 
   // a última animação criada NESTE navegador volta sob demanda, pelo painel
@@ -795,8 +832,7 @@ ajustar();el.textContent=FRAMES[0];agendar();
       frames = demo;
       ajustar();
       mostrar();
-      reiniciarAudio();
-      agendar();
+      mostrarModal(); // pausado no frame 1 — o play do modal inicia tudo junto
       return;
     }
     // exemplo indisponível: cai pra última animação salva, senão instruções
