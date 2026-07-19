@@ -30,9 +30,13 @@ const LIMITE_BODY = Math.ceil(MAX_ARQUIVOS * MAX_TAMANHO_ARQUIVO * 4 / 3) + 1024
 // ---------- modo dev × deploy ----------
 // Acesso local (loopback) é modo dev: upload liberado, sem limite de quantidade
 // de imagens. Qualquer outro acesso (deploy) fica com o upload DESATIVADO por
-// enquanto (fase de testes). MODO=dev força o modo dev mesmo atrás de proxy.
+// enquanto (fase de testes). MODO=dev força o modo dev mesmo atrás de proxy;
+// MODO=producao força o modo produção mesmo em localhost (pra pré-visualizar
+// o site como o usuário final vê).
 const FORCA_DEV = process.env.MODO === 'dev';
+const FORCA_PROD = process.env.MODO === 'producao';
 function ehDev(req) {
+  if (FORCA_PROD) return false;
   if (FORCA_DEV) return true;
   const ip = req.socket.remoteAddress || '';
   return ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
